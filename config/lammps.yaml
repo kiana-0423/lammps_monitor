@@ -1,6 +1,0 @@
-backend:
-  md_engine: lammps
-
-lammps:
-  executable: lmp
-  dump_style: custom
