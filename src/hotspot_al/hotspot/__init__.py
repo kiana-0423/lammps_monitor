@@ -1,0 +1,1 @@
+"""Hotspot detection and clustering."""

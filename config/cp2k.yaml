@@ -1,0 +1,10 @@
+backend:
+  dft_engine: cp2k
+
+cp2k:
+  executable: cp2k.popt
+  functional: PBE
+  basis: DZVP-MOLOPT-SR-GTH
+  potential: GTH-PBE
+  cutoff: 400
+  rel_cutoff: 60

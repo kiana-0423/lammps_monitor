@@ -1,0 +1,152 @@
+project:
+  name: hotspot_active_learning
+  method_name: PHAL
+  description: physics-aware hotspot active learning for Allegro-LAMMPS-CP2K
+
+backend:
+  mlip: allegro
+  md_engine: lammps
+  dft_engine: cp2k
+
+lammps:
+  executable: lmp
+  input_template: null
+  dump_style: custom
+  dump_fields:
+    - id
+    - type
+    - x
+    - y
+    - z
+    - vx
+    - vy
+    - vz
+    - fx
+    - fy
+    - fz
+  type_map:
+    1: C
+    2: O
+    3: H
+  timestep_fs: 0.5
+
+allegro:
+  enabled: true
+  model_paths:
+    - allegro_000.pth
+    - allegro_001.pth
+    - allegro_002.pth
+    - allegro_003.pth
+  deployed_model_paths: []
+  lammps_pair_style: allegro
+  committee_mode: offline
+
+monitor:
+  light_interval: 1
+  physics_interval: triggered
+  committee_interval: triggered
+  force_z_threshold: 4.0
+  delta_force_z_threshold: 4.0
+  delta_q_threshold: 0.5
+  rmin_threshold: null
+  displacement_z_threshold: 4.0
+  coordination_smoothing_power: 6
+  coordination_scale: 1.15
+  lj_cutoff: 6.0
+
+ood_score:
+  weights:
+    force: 1.0
+    delta_force: 1.5
+    rmin: 1.0
+    delta_q: 1.0
+    lj_residual: 2.0
+    committee: 2.0
+    displacement: 1.0
+  screen_threshold: 4.0
+  physics_threshold: 5.0
+  label_threshold: 6.0
+  min_trigger_atoms: 1
+  running_stats:
+    enabled: true
+    warmup_frames: 5
+    min_std: 1.0e-8
+
+buffer:
+  pre_trigger_frames: 10
+  post_trigger_frames: 5
+  maxlen: 32
+
+hotspot:
+  threshold: 6.0
+  merge_radius: 8.0
+
+extraction:
+  mode: cluster
+  mlip_cutoff: 6.0
+  core_radius: 4.0
+  buffer_radius: 4.0
+  extract_radius: 10.0
+  boundary_thickness: 2.0
+  max_atoms: 400
+  min_atoms: 30
+  vacuum_padding: 4.0
+  slab:
+    lx: 16.0
+    ly: 16.0
+    z_margin: 8.0
+  graph:
+    hops: 2
+
+h_capping:
+  enabled: true
+  covalent_scale: 1.2
+  allow_core_capping: false
+  optimize_h_only: true
+  disabled_for_metals: true
+  disabled_for_oxides_by_default: true
+  bond_lengths:
+    C: 1.09
+    Si: 1.48
+    O: 0.96
+    N: 1.01
+    S: 1.34
+    P: 1.42
+    B: 1.19
+
+cp2k:
+  executable: cp2k.popt
+  functional: PBE
+  basis: DZVP-MOLOPT-SR-GTH
+  potential: GTH-PBE
+  cutoff: 400
+  rel_cutoff: 60
+  charge: 0
+  multiplicity: 1
+  poisson_solver: WAVELET
+  periodic: NONE
+  scf_eps: 1.0e-6
+  max_scf: 100
+  use_ot: true
+  dispersion: false
+  h_only_opt:
+    enabled: true
+    max_iter: 50
+  single_point:
+    enabled: true
+    print_forces: true
+
+training_mask:
+  core: 1.0
+  inner_buffer: 0.3
+  outer_buffer: 0.0
+  boundary: 0.0
+  h_cap: 0.0
+  energy_weight: 0.0
+  stress_weight: 0.0
+
+candidate_pool:
+  deduplicate: true
+  max_candidates_per_round: 50
+  fingerprint: pair_distance_histogram
+  diversity_threshold: 0.1

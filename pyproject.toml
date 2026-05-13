@@ -1,0 +1,46 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hotspot-al"
+version = "0.1.0"
+description = "Atom-resolved, physics-aware hotspot active learning for Allegro-LAMMPS-CP2K reactive MLIP-MD."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [
+  { name = "OpenAI Codex" }
+]
+dependencies = [
+  "numpy>=1.24",
+  "scipy>=1.10",
+  "ase>=3.22",
+  "pyyaml>=6.0",
+  "networkx>=3.0",
+  "tqdm>=4.66",
+  "h5py>=3.9",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.0",
+]
+viz = [
+  "matplotlib>=3.7",
+  "pandas>=2.0",
+]
+chem = [
+  "pymatgen>=2024.0.0",
+  "rdkit>=2024.0.0",
+]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]

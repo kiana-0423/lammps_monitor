@@ -1,0 +1,6 @@
+backend:
+  mlip: allegro
+
+allegro:
+  enabled: true
+  committee_mode: offline
