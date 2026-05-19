@@ -39,13 +39,13 @@ class MLIPBackend(ABC):
         """Write backend-specific training data."""
 
     def train(self, config: dict[str, Any]):
-        """Launch training. This remains an integration hook."""
+        """Launch training or return an external integration command."""
 
         msg = f"{self.name} training launch is not implemented in the baseline package."
         raise NotImplementedError(msg)
 
     def export_model(self, output_dir: str | Path):
-        """Export a deployable model artifact."""
+        """Export a deployable model artifact or return an export command."""
 
         msg = f"{self.name} model export is not implemented in the baseline package."
         raise NotImplementedError(msg)

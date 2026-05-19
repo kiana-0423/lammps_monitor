@@ -38,6 +38,12 @@ allegro:
     - allegro_002.pth
     - allegro_003.pth
   deployed_model_paths: []
+  dataset_dir: null
+  train_output_dir: null
+  checkpoint_path: null
+  train_config_path: null
+  train_command_template: null
+  export_command_template: null
   lammps_pair_style: allegro
   committee_mode: offline
 
