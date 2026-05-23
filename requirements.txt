@@ -1,9 +1,7 @@
+# Base runtime dependencies for `pip install -r requirements.txt`.
+# For development and tests, prefer: pip install -e ".[dev]"
+# For optional visualization helpers, use: pip install -e ".[viz]"
 numpy>=1.24
 scipy>=1.10
 ase>=3.22
 pyyaml>=6.0
-networkx>=3.0
-pandas>=2.0
-tqdm>=4.66
-h5py>=3.9
-matplotlib>=3.7

@@ -17,9 +17,6 @@ dependencies = [
   "scipy>=1.10",
   "ase>=3.22",
   "pyyaml>=6.0",
-  "networkx>=3.0",
-  "tqdm>=4.66",
-  "h5py>=3.9",
 ]
 
 [project.optional-dependencies]
@@ -29,6 +26,10 @@ dev = [
 viz = [
   "matplotlib>=3.7",
   "pandas>=2.0",
+]
+io = [
+  "h5py>=3.9",
+  "tqdm>=4.66",
 ]
 chem = [
   "pymatgen>=2024.0.0",
