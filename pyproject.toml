@@ -45,3 +45,11 @@ where = ["src"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
+addopts = "-ra"
+markers = [
+  "integration: tests requiring external programs",
+  "allegro: tests requiring real Allegro runtime",
+  "lammps: tests requiring real LAMMPS executable",
+  "cp2k: tests requiring real CP2K executable",
+  "slow: slow tests",
+]
