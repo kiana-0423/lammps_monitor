@@ -212,7 +212,22 @@ pip install -r requirements.txt
 真实环境验证进度：
 
 - Level 1: Allegro/NequIP Python runtime smoke test —— 已通过
-- Level 2: H2O Allegro/NequIP model inference smoke test —— 需提供支持 H/O 的模型后执行
+- Level 2: H2O structure construction smoke test —— 已通过
+- Level 2B: tiny H/O toy model inference smoke test —— 已通过
+
+当前已验证的 Allegro/NequIP Python 层状态：
+
+- conda 环境：`allegro-mac`
+- Python：`/opt/miniconda3/envs/allegro-mac/bin/python`，版本 `3.11.15`
+- `torch`：`2.12.0`，可导入
+- `nequip`：`0.18.0`，可导入
+- `allegro`：`0.8.2`，可导入
+- `ase`：`3.28.0`，可导入
+- CPU：可用
+- MPS：当前不可用，但不视为失败
+- tiny H2O synthetic dataset：`tests/fixtures/allegro/tiny_h2o_synthetic.extxyz`
+- tiny H/O model：`tests/fixtures/models/tiny_h2o_allegro_model.pth`
+- H2O inference：已成功输出 total energy 和 shape 为 `(3, 3)` 的 forces
 
 Allegro/NequIP 真实环境 smoke test 进入环境：
 
@@ -240,12 +255,12 @@ python scripts/train_tiny_allegro_h2o.py
 
 RUN_EXTERNAL=1 \
 ALLEGRO_SMOKE_DEVICE=cpu \
-ALLEGRO_MODEL_PATH=/path/to/h_o_model.pth \
+ALLEGRO_MODEL_PATH=tests/fixtures/models/tiny_h2o_allegro_model.pth \
 ALLEGRO_INFERENCE_REQUIRED=1 \
 pytest tests/integration/test_allegro_h2o_inference_real.py -q
 
 ALLEGRO_SMOKE_DEVICE=cpu \
-ALLEGRO_MODEL_PATH=/path/to/h_o_model.pth \
+ALLEGRO_MODEL_PATH=tests/fixtures/models/tiny_h2o_allegro_model.pth \
 ALLEGRO_INFERENCE_REQUIRED=1 \
 python scripts/smoke_allegro_h2o_inference.py
 ```
@@ -261,6 +276,20 @@ LAMMPS + Allegro `pair_allegro` 联动测试和 CP2K 测试属于下一阶段，
 生成的 tiny H/O 模型只用于 smoke test；如果当前 Allegro 训练配置/API 不稳定，
 该脚本使用 NequIP 最小模型作为 fallback 来验证 NequIP/Allegro runtime 的模型
 加载与 inference 链路。该模型没有物理意义，不能用于科研结论。
+
+最近一次 Level 2B 直接推理输出摘要：
+
+```text
+model supported symbols metadata: ['H', 'O']
+water total energy: -0.017012965336119387
+water forces shape: (3, 3)
+device: cpu
+inference status: ok
+```
+
+下一阶段可以进入 LAMMPS + Allegro `pair_allegro` 联动 smoke test；该阶段需要
+单独验证 LAMMPS、`pair_allegro` 插件和模型部署格式，不属于当前 Python runtime
+smoke test 范围。
 
 ## Allegro 数据输出说明
 
