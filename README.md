@@ -209,6 +209,59 @@ pip install -r requirements.txt
 - `test_mask_generator.py`
 - `test_allegro_adapter.py`
 
+真实环境验证进度：
+
+- Level 1: Allegro/NequIP Python runtime smoke test —— 已通过
+- Level 2: H2O Allegro/NequIP model inference smoke test —— 需提供支持 H/O 的模型后执行
+
+Allegro/NequIP 真实环境 smoke test 进入环境：
+
+```bash
+source "$(conda info --base)/etc/profile.d/conda.sh"
+conda activate allegro-mac
+```
+
+Stage 1：Allegro runtime smoke test：
+
+```bash
+python scripts/smoke_allegro.py
+RUN_EXTERNAL=1 ALLEGRO_SMOKE_DEVICE=cpu pytest tests/integration/test_allegro_real.py -q
+RUN_EXTERNAL=1 ALLEGRO_SMOKE_DEVICE=auto pytest tests/integration/test_allegro_real.py -q
+RUN_EXTERNAL=1 ALLEGRO_SMOKE_DEVICE=mps pytest tests/integration/test_allegro_real.py -q
+```
+
+Stage 2：H2O 模型推理 smoke test：
+
+```bash
+RUN_EXTERNAL=1 pytest tests/integration/test_allegro_h2o_inference_real.py -q
+
+python scripts/make_tiny_h2o_dataset.py
+python scripts/train_tiny_allegro_h2o.py
+
+RUN_EXTERNAL=1 \
+ALLEGRO_SMOKE_DEVICE=cpu \
+ALLEGRO_MODEL_PATH=/path/to/h_o_model.pth \
+ALLEGRO_INFERENCE_REQUIRED=1 \
+pytest tests/integration/test_allegro_h2o_inference_real.py -q
+
+ALLEGRO_SMOKE_DEVICE=cpu \
+ALLEGRO_MODEL_PATH=/path/to/h_o_model.pth \
+ALLEGRO_INFERENCE_REQUIRED=1 \
+python scripts/smoke_allegro_h2o_inference.py
+```
+
+H2O inference smoke test 要求模型支持 H 和 O 元素。如果模型不支持 H/O，
+失败原因是模型元素类型不匹配，不代表 Allegro/NequIP 环境不可用。Mac
+上默认使用 CPU，MPS 只作为实验性检查，CUDA 不属于 Mac smoke test 范围。
+LAMMPS + Allegro `pair_allegro` 联动测试和 CP2K 测试属于下一阶段，不在
+本次范围内。
+
+`scripts/make_tiny_h2o_dataset.py` 生成的 H2O-like 数据集使用 toy/synthetic
+势能函数写入 energy/forces，不是 DFT 数据。`scripts/train_tiny_allegro_h2o.py`
+生成的 tiny H/O 模型只用于 smoke test；如果当前 Allegro 训练配置/API 不稳定，
+该脚本使用 NequIP 最小模型作为 fallback 来验证 NequIP/Allegro runtime 的模型
+加载与 inference 链路。该模型没有物理意义，不能用于科研结论。
+
 ## Allegro 数据输出说明
 
 当前实现导出 `extxyz`，包含：

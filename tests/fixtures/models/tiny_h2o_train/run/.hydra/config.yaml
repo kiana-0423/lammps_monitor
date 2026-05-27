@@ -1,0 +1,81 @@
+run:
+- train
+seed: 7
+cutoff_radius: 3.0
+model_type_names:
+- O
+- H
+chemical_species: ${model_type_names}
+per_edge_type_cutoff: null
+dataloader:
+  _target_: torch.utils.data.DataLoader
+  batch_size: 2
+data:
+  _target_: nequip.data.datamodule.NequIPDataModule
+  seed: ${seed}
+  split_dataset:
+    dataset:
+      _target_: nequip.data.dataset.ASEDataset
+      file_path: /Users/guo/Documents/workspace/lammps_monitor/tests/fixtures/allegro/tiny_h2o_synthetic.extxyz
+      transforms:
+      - _target_: nequip.data.transforms.ChemicalSpeciesToAtomTypeMapper
+        model_type_names: ${model_type_names}
+        chemical_species_to_atom_type_map: ${list_to_identity_dict:${chemical_species}}
+      - _target_: nequip.data.transforms.NeighborListTransform
+        r_max: ${cutoff_radius}
+    train: 8
+    val: 2
+    test: 2
+  train_dataloader: ${dataloader}
+  val_dataloader: ${dataloader}
+  test_dataloader: ${dataloader}
+  stats_manager:
+    _target_: nequip.data.CommonDataStatisticsManager
+    type_names: ${model_type_names}
+trainer:
+  _target_: lightning.Trainer
+  max_epochs: 2
+  accelerator: cpu
+  devices: 1
+  check_val_every_n_epoch: 1
+  log_every_n_steps: 1
+  enable_progress_bar: false
+  callbacks:
+  - _target_: lightning.pytorch.callbacks.ModelCheckpoint
+    monitor: val0_epoch/weighted_sum
+    dirpath: ${hydra:runtime.output_dir}
+    filename: best
+    save_last: true
+training_module:
+  _target_: nequip.train.EMALightningModule
+  loss:
+    _target_: nequip.train.EnergyForceLoss
+    per_atom_energy: true
+    coeffs:
+      total_energy: 1.0
+      forces: 1.0
+  val_metrics:
+    _target_: nequip.train.EnergyForceMetrics
+    coeffs:
+      total_energy_mae: 1.0
+      forces_mae: 1.0
+  train_metrics: ${training_module.val_metrics}
+  test_metrics: ${training_module.val_metrics}
+  optimizer:
+    _target_: torch.optim.Adam
+    lr: 0.01
+  model:
+    _target_: nequip.model.NequIPGNNModel
+    seed: ${seed}
+    model_dtype: float32
+    type_names: ${model_type_names}
+    r_max: ${cutoff_radius}
+    l_max: 1
+    parity: true
+    num_layers: 1
+    num_features: 4
+    radial_mlp_depth: 1
+    radial_mlp_width: 4
+    avg_num_neighbors: ${training_data_stats:per_type_num_neighbors_mean}
+    per_type_energy_shifts: ${training_data_stats:per_atom_energy_mean}
+    per_type_energy_scales: ${training_data_stats:per_type_forces_rms}
