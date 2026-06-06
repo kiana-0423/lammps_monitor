@@ -134,6 +134,11 @@ h_capping:
 
 cp2k:
   executable: cp2k.popt
+  submit_mode: dry_run
+  task_dir: ./cp2k_tasks
+  labeled_dataset_dir: ./labeled_data
+  max_retries: 0
+  slurm_directives: ""
   functional: PBE
   basis: DZVP-MOLOPT-SR-GTH
   potential: GTH-PBE
@@ -153,6 +158,16 @@ cp2k:
   single_point:
     enabled: true
     print_forces: true
+
+retraining:
+  min_new_samples: 10
+  interval_hours: 24
+  dry_run: true
+  state_path: ./training_data/retrain_state.json
+  export_dir: ./training_data/exports
+
+model_registry:
+  root_dir: ./model_registry
 
 training_mask:
   core: 1.0

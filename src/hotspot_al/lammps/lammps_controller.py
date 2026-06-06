@@ -8,7 +8,10 @@ import time
 from pathlib import Path
 from typing import Any
 
+from ase import Atoms
+
 from hotspot_al.lammps.dump_parser import iter_lammps_dump
+from hotspot_al.lammps.lammps_input import write_full_lammps_input
 from hotspot_al.lammps.lammps_runner import build_lammps_command
 from hotspot_al.models import FrameData
 
@@ -36,6 +39,38 @@ class LAMMPSController:
         self.process: subprocess.Popen[str] | None = None
         self._offset = 0
         self._queued_frames: list[FrameData] = []
+
+    @classmethod
+    def from_atoms(
+        cls,
+        atoms: Atoms,
+        *,
+        pair_style_block: str,
+        config: dict[str, Any],
+        work_dir: str | Path | None = None,
+        input_name: str = "in.hotspot_al",
+        data_name: str = "system.data",
+        poll_interval: float = 0.1,
+    ) -> "LAMMPSController":
+        """Write a complete LAMMPS run directory and return a controller."""
+
+        resolved_work_dir = Path(work_dir or config.get("online", {}).get("work_dir", "."))
+        input_file = resolved_work_dir / input_name
+        write_full_lammps_input(
+            input_file,
+            pair_style_block=pair_style_block,
+            config=config,
+            atoms=atoms,
+            data_file=data_name,
+        )
+        dump_file = config.get("online", {}).get("dump_file", "dump.online.lammpstrj")
+        return cls(
+            input_file,
+            dump_file=dump_file,
+            config=config,
+            work_dir=resolved_work_dir,
+            poll_interval=poll_interval,
+        )
 
     def __enter__(self) -> "LAMMPSController":
         self.start()

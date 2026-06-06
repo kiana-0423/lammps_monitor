@@ -58,6 +58,32 @@ Allegro retraining
 Updated Allegro-LAMMPS simulation
 ```
 
+```mermaid
+flowchart TD
+    A[Allegro-LAMMPS MD] --> B[OnlineMonitor]
+    B --> C[Atom-wise OOD scores]
+    C --> D[Rolling event buffer]
+    D --> E[Hotspot extraction]
+    E --> F[CP2KTaskSubmitter]
+    F --> G[Masked extxyz dataset]
+    G --> H[RetrainTrigger]
+    H --> I[ModelRegistry]
+    I --> J[Deployed Allegro model paths]
+```
+
+```mermaid
+sequenceDiagram
+    participant L as LAMMPSController
+    participant M as OnlineMonitor
+    participant S as OnlineEventScheduler
+    participant C as CP2KTaskSubmitter
+    L->>M: FrameData
+    M->>M: full/light OOD scoring
+    M->>S: EventRecord
+    S->>C: ScheduledTask
+    C->>C: extract region + H caps + CP2K input
+```
+
 ## 当前实现范围
 
 已经实现的最小可验证模块：
@@ -74,15 +100,21 @@ Updated Allegro-LAMMPS simulation
 - 通用 `extxyz + npz + metadata` 数据输出；
 - Allegro extxyz + per-atom mask 导出；
 - Allegro 薄 runner 骨架：可注入单模型 force evaluator，以及 train/export command template；
+- 在线 `LAMMPSController`、`OnlineMonitor`、`OnlineEventScheduler`；
+- `CP2KTaskSubmitter`：dry-run / local / Slurm 提交模式与完成后训练样本写入；
+- `RetrainTrigger`：按样本数、时间或手动触发 Allegro 训练/导出；
+- `ModelRegistry`：模型版本记录、部署路径更新和回滚；
+- 完整 LAMMPS input/data 生成辅助函数；
+- 配置 schema 校验与项目异常基类；
 - 轻量 candidate pool 与几何去重接口。
 
 当前仍保留为接口、骨架或外部适配部分：
 
 - 在线 Allegro 模型推理与 committee evaluator；
-- LAMMPS / CP2K 真实任务调度与失败恢复；
+- LAMMPS / CP2K 真实可执行程序、HPC 队列策略和站点环境配置；
 - point-charge embedding 的具体实现；
 - Allegro 训练代码中的 mask-aware loss 深度集成；
-- 生产级候选池排序、版本管理和 retraining orchestration。
+- 生产级候选池排序和多轮主动学习策略。
 
 ## 目录结构
 
@@ -194,6 +226,7 @@ pip install -r requirements.txt
 - `examples/03_generate_cp2k_inputs.py`
 - `examples/04_parse_cp2k_forces.py`
 - `examples/05_write_allegro_dataset.py`
+- `examples/06_online_monitor.py`
 
 这些示例展示的是模块连接方式，不是完整生产流水线。示例中的 `dump.lammpstrj`、`trajectory.extxyz` 等输入文件需要用户替换为自己的数据路径，例如 `./data/trajectory.extxyz`。真实 Allegro、LAMMPS、CP2K 外部程序不会由这些示例自动配置。
 

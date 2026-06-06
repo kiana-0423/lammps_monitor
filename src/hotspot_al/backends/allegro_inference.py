@@ -79,6 +79,16 @@ class AllegroInference:
 
         return evaluate
 
+    def reload(self, model_paths: list[str | Path] | None = None) -> None:
+        """Drop cached model objects and optionally switch deployed paths."""
+
+        if model_paths is not None:
+            if not model_paths:
+                msg = "AllegroInference.reload requires at least one model path when paths are provided."
+                raise ValueError(msg)
+            self.model_paths = [Path(path) for path in model_paths]
+        self._cache.clear()
+
     def predict_forces(
         self,
         atoms: Atoms,

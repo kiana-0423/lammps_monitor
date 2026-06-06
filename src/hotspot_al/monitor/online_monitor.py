@@ -20,6 +20,7 @@ from hotspot_al.monitor.geometry_monitor import displacement_norms, minimum_neig
 from hotspot_al.monitor.neighbor_utils import MonitorNeighbors
 from hotspot_al.monitor.ood_score import OODScorer
 from hotspot_al.training.allegro_runner import AllegroRunner
+from hotspot_al.exceptions import DataError
 from hotspot_al.utils.geometry import row_norms
 
 
@@ -117,10 +118,12 @@ class OnlineMonitor:
 
         if frame.forces is None:
             msg = "Online monitoring requires LAMMPS dump forces fx/fy/fz."
-            raise ValueError(msg)
+            raise DataError(msg)
         atoms = frame.atoms
         self._ensure_neighbors(atoms)
-        assert self._neighbors is not None
+        if self._neighbors is None:
+            msg = "Online monitor neighbor list was not initialized."
+            raise DataError(msg)
 
         q_values = smooth_coordination_numbers_fast(atoms, self._neighbors)
         metrics = {

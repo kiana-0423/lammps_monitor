@@ -20,6 +20,7 @@ jobs:
         run: |
           python -m pip install -U pip
           python -m pip install -e ".[dev]"
+      - name: Ruff
+        run: python -m ruff check src tests examples
       - name: Run offline tests
         run: bash tests/scripts/run_all_offline.sh
-

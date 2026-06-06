@@ -8,6 +8,8 @@ from typing import Any
 
 import yaml
 
+from hotspot_al.config_schema import validate_config
+
 
 DEFAULT_CONFIG_PATH = Path(__file__).resolve().parents[3] / "config" / "default.yaml"
 
@@ -37,5 +39,5 @@ def load_config(path: str | Path | None = None, *, base_path: str | Path | None 
 
     base = load_yaml(base_path or DEFAULT_CONFIG_PATH)
     if path is None:
-        return base
-    return merge_dicts(base, load_yaml(path))
+        return validate_config(base)
+    return validate_config(merge_dicts(base, load_yaml(path)))
