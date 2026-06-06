@@ -24,6 +24,10 @@ dev = [
   "pytest>=8.0",
   "ruff>=0.6",
 ]
+inference = [
+  "torch>=2.0",
+  "nequip>=0.6.0",
+]
 viz = [
   "matplotlib>=3.7",
   "pandas>=2.0",

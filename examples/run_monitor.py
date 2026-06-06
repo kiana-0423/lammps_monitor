@@ -41,7 +41,7 @@ def main() -> None:
             "rmin": minimum_neighbor_distances_fast(frame.atoms, neighbors),
             "delta_q": coordination_deltas(q_values, previous_q),
         }
-        result = scorer.score_frame(metrics)
+        result = scorer.score_light(metrics, metadata={"backend": config["backend"]["mlip"]})
         print(frame.step, result.max_score, result.hotspot_indices, result.trigger_reason)
         previous_forces = frame.forces
         previous_q = q_values

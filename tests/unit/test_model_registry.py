@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from hotspot_al.training.model_registry import ModelRegistry
 
 
@@ -36,3 +38,13 @@ def test_model_registry_registers_deploys_and_rolls_back(tmp_path: Path) -> None
     assert rolled_back.version == first.version
     assert config["allegro"]["deployed_model_paths"] == [str(first.path)]
     assert inference.paths == [first.path]
+
+
+def test_model_registry_default_smoke_test_rejects_empty_model(tmp_path: Path) -> None:
+    registry = ModelRegistry(tmp_path / "registry")
+    model = tmp_path / "empty.pth"
+    model.write_text("", encoding="utf-8")
+    registered = registry.register_model(model)
+
+    with pytest.raises(ValueError, match="empty"):
+        registry.deploy(version=registered.version)

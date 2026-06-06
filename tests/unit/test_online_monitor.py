@@ -105,3 +105,19 @@ def test_online_monitor_respects_monitor_frequency() -> None:
 
     assert [result.stage for result in results] == ["full", "light", "full"]
     assert evaluator.calls == 6
+
+
+def test_online_monitor_progress_callback_reports_frames() -> None:
+    progress: list[dict[str, Any]] = []
+    monitor = OnlineMonitor(
+        config=_config(),
+        runner=AllegroRunner(force_evaluator=CountingEvaluator()),
+        frame_source=[_frame(0, 2.0), _frame(1, 0.1)],
+        on_event=lambda _event: None,
+        progress_callback=progress.append,
+    )
+
+    monitor.run()
+
+    assert [item["processed_frames"] for item in progress] == [1, 2]
+    assert progress[-1]["triggered_frames"] >= 1

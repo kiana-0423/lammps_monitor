@@ -22,6 +22,7 @@ from hotspot_al.monitor.ood_score import OODScorer
 from hotspot_al.training.allegro_runner import AllegroRunner
 from hotspot_al.exceptions import DataError
 from hotspot_al.utils.geometry import row_norms
+from hotspot_al.utils.logging import configure_logging
 
 
 class FrameSource(Protocol):
@@ -31,6 +32,7 @@ class FrameSource(Protocol):
 
 
 EventCallback = Callable[[EventRecord], None]
+ProgressCallback = Callable[[dict[str, Any]], None]
 
 
 class OnlineMonitor:
@@ -47,8 +49,10 @@ class OnlineMonitor:
         buffer: RollingBuffer | None = None,
         output_dir: str | Path | None = None,
         scheduler: OnlineEventScheduler | None = None,
+        progress_callback: ProgressCallback | None = None,
     ) -> None:
         self.config = config
+        self.logger = configure_logging(config, name=__name__)
         self.runner = runner
         self.frame_source = frame_source
         self.scorer = scorer or OODScorer(config)
@@ -63,24 +67,30 @@ class OnlineMonitor:
         self.output_dir = Path(output_dir or online_cfg.get("event_dir") or Path(online_cfg.get("work_dir", ".")) / "events")
         self.on_event = on_event or self.write_event
         self.scheduler = scheduler
+        self.progress_callback = progress_callback
+        self.summary_interval = max(0, int(online_cfg.get("summary_interval", 0)))
         self._previous_positions: np.ndarray | None = None
         self._previous_forces: np.ndarray | None = None
         self._previous_q: np.ndarray | None = None
         self._neighbors: MonitorNeighbors | None = None
         self._last_event_step: int | None = None
+        self._stats = {"processed_frames": 0, "triggered_frames": 0, "events": 0, "full_frames": 0, "light_frames": 0}
 
     def run(self, *, max_frames: int | None = None, frame_timeout: float | None = None) -> list[OODFrameResult]:
         """Process frames until the source is exhausted or ``max_frames`` is reached."""
 
         results: list[OODFrameResult] = []
         processed = 0
+        self.logger.info("starting online monitor")
         try:
             while max_frames is None or processed < max_frames:
                 frame = self._next_frame(timeout=frame_timeout)
                 if frame is None:
+                    self.logger.info("frame source exhausted after %d frames", processed)
                     break
                 result = self.process_frame(frame, frame_index=processed)
                 results.append(result)
+                self._record_progress(result)
                 event = self.buffer.push(frame)
                 finalized_event = event is not None
                 if event is not None:
@@ -100,6 +110,7 @@ class OnlineMonitor:
                         self._handle_event(completed)
                 processed += 1
         except KeyboardInterrupt:
+            self.logger.info("online monitor interrupted after %d frames", processed)
             pass
         finally:
             event = self.buffer.flush()
@@ -108,10 +119,18 @@ class OnlineMonitor:
         return results
 
     def _handle_event(self, event: EventRecord) -> None:
+        self._stats["events"] += 1
+        self.logger.info(
+            "handling event %s at step %s with %d hotspot atoms",
+            event.event_id or f"event-{event.step}",
+            event.step,
+            len(event.hotspot_atoms),
+        )
         self.on_event(event)
         if self.scheduler is not None:
             self.scheduler.schedule_event(event)
-            self.scheduler.drain()
+            drained = self.scheduler.drain()
+            self.logger.info("scheduler drained %d task(s)", len(drained))
 
     def process_frame(self, frame: FrameData, *, frame_index: int = 0) -> OODFrameResult:
         """Compute online metrics and score one frame."""
@@ -141,6 +160,7 @@ class OnlineMonitor:
 
         full_frame = frame_index % self.monitor_freq == 0
         if full_frame:
+            self.logger.debug("processing full frame step=%s index=%d", frame.step, frame_index)
             mlip_forces = self.runner.evaluate_forces(atoms, config=self.config, model_path=self._primary_model_path())
             metrics["mlip_force"] = force_norms(mlip_forces)
             metrics["mlip_force_deviation"] = row_norms(np.asarray(frame.forces, dtype=float) - mlip_forces)
@@ -150,6 +170,7 @@ class OnlineMonitor:
                 metrics["committee"] = committee_force_deviation(committee_forces)
             result = self.scorer.score_full(metrics, atoms=atoms, forces=frame.forces)
         else:
+            self.logger.debug("processing light frame step=%s index=%d", frame.step, frame_index)
             result = self.scorer.score_light(metrics)
 
         self._previous_positions = atoms.get_positions().copy()
@@ -186,6 +207,35 @@ class OnlineMonitor:
                     atoms.arrays["forces"] = np.asarray(frame.forces, dtype=float)
                 atoms_list.append(atoms)
             write(event_dir / "frames.extxyz", atoms_list, format="extxyz")
+        self.logger.info("wrote event files to %s", event_dir)
+
+    def _record_progress(self, result: OODFrameResult) -> None:
+        self._stats["processed_frames"] += 1
+        if result.triggered:
+            self._stats["triggered_frames"] += 1
+            self.logger.info(
+                "OOD trigger stage=%s max_score=%.3f hotspot_atoms=%s reasons=%s",
+                result.stage,
+                result.max_score,
+                result.hotspot_indices,
+                result.trigger_reason,
+            )
+        if result.stage == "full":
+            self._stats["full_frames"] += 1
+        else:
+            self._stats["light_frames"] += 1
+        payload = {**self._stats, "last_stage": result.stage, "last_max_score": result.max_score}
+        if self.progress_callback is not None:
+            self.progress_callback(payload)
+        if self.summary_interval and self._stats["processed_frames"] % self.summary_interval == 0:
+            self.logger.info(
+                "monitor progress frames=%d triggers=%d events=%d full=%d light=%d",
+                self._stats["processed_frames"],
+                self._stats["triggered_frames"],
+                self._stats["events"],
+                self._stats["full_frames"],
+                self._stats["light_frames"],
+            )
 
     def _next_frame(self, *, timeout: float | None) -> FrameData | None:
         if hasattr(self.frame_source, "next_frame"):

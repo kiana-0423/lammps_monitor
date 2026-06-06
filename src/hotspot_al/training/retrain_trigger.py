@@ -12,6 +12,7 @@ from ase.io import read, write
 
 from hotspot_al.training.allegro_runner import AllegroRunner
 from hotspot_al.training.model_registry import ModelRegistry, ModelVersion
+from hotspot_al.utils.logging import configure_logging
 
 
 @dataclass(slots=True)
@@ -54,6 +55,7 @@ class RetrainTrigger:
         self.interval_hours = float(retrain_cfg.get("interval_hours", 24.0))
         self.dry_run = bool(retrain_cfg.get("dry_run", True))
         self.export_dir = Path(retrain_cfg.get("export_dir", allegro_cfg.get("export_dir", self.dataset_dir / "exports")))
+        self.logger = configure_logging(config, name=__name__)
 
     def check_and_run(self, *, force: bool = False) -> RetrainResult:
         """Check trigger conditions and run training if needed."""
@@ -64,10 +66,13 @@ class RetrainTrigger:
         new_count = max(0, len(samples) - previous_count)
         reason = self._trigger_reason(force=force, new_count=new_count, state=state)
         if reason is None:
+            self.logger.info("retraining not due: samples=%d new_samples=%d", len(samples), new_count)
             return RetrainResult(False, "not_due", len(samples), metadata={"new_samples": new_count})
         if not samples:
+            self.logger.info("retraining skipped: no labeled samples found in %s", self.labeled_dir)
             return RetrainResult(False, "no_samples", 0)
 
+        self.logger.info("retraining triggered reason=%s samples=%d new_samples=%d", reason, len(samples), new_count)
         dataset_path = self.merge_samples(samples)
         self.config.setdefault("allegro", {})["dataset_dir"] = str(self.dataset_dir)
         self.config["allegro"].setdefault("train_output_dir", str(self.dataset_dir / "runs"))
@@ -75,6 +80,7 @@ class RetrainTrigger:
         export_result = self.runner.export_model(self.export_dir, config=self.config, dry_run=self.dry_run)
         model_version = self._register_exported_model(sample_count=len(samples))
         self._write_state({"sample_count": len(samples), "last_run_at": _now(), "last_reason": reason})
+        self.logger.info("retraining finished reason=%s dataset=%s", reason, dataset_path)
         return RetrainResult(
             True,
             reason,
@@ -132,7 +138,7 @@ class RetrainTrigger:
             return None
         model_path = self.config.get("retraining", {}).get("exported_model_path")
         if model_path is None:
-            candidates = sorted(self.export_dir.glob("*.pth"))
+            candidates = sorted(self.export_dir.glob("*.pth"), key=lambda path: (path.stat().st_mtime, path.name))
             model_path = candidates[-1] if candidates else None
         if model_path is None:
             return None

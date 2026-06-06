@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import re
 import subprocess
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -20,6 +21,7 @@ from hotspot_al.extraction.h_capping import add_h_caps
 from hotspot_al.models import ExtractedRegion
 from hotspot_al.training.dataset_writer import write_dataset_entry
 from hotspot_al.training.mask_generator import generate_atom_mask
+from hotspot_al.utils.logging import configure_logging
 
 
 @dataclass(slots=True)
@@ -35,6 +37,7 @@ class CP2KSubmittedJob:
     job_id: str | None = None
     status: str = "submitted"
     attempts: int = 1
+    started_at: float | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
@@ -62,6 +65,8 @@ class CP2KTaskSubmitter:
         self.dataset_dir = Path(dataset_dir or cp2k_cfg.get("labeled_dataset_dir", "./labeled_data"))
         self.mode = str(mode or cp2k_cfg.get("submit_mode", "dry_run"))
         self.max_retries = int(max_retries if max_retries is not None else cp2k_cfg.get("max_retries", 0))
+        self.max_walltime_seconds = _resolve_walltime_seconds(config)
+        self.logger = configure_logging(config, name=__name__)
         if self.mode not in {"dry_run", "local", "slurm"}:
             msg = "cp2k submit mode must be one of: dry_run, local, slurm."
             raise ValueError(msg)
@@ -78,6 +83,7 @@ class CP2KTaskSubmitter:
 
         task_dir = self.work_dir / task.task_id
         task_dir.mkdir(parents=True, exist_ok=True)
+        self.logger.info("preparing CP2K task %s", task.task_id)
         region = self._prepare_region(task)
         write(task_dir / "region.extxyz", region.atoms, format="extxyz")
         written = write_cp2k_inputs(region, task_dir, config=self.config, job_name=task.task_id)
@@ -106,6 +112,7 @@ class CP2KTaskSubmitter:
         elif self.mode == "slurm":
             job.job_id = self._submit_slurm(job)
         self.jobs[task.task_id] = job
+        self.logger.info("CP2K task %s status=%s mode=%s", task.task_id, job.status, job.mode)
         return job
 
     def poll_job(self, task_id: str) -> CP2KSubmittedJob:
@@ -115,16 +122,29 @@ class CP2KTaskSubmitter:
         if job.mode == "dry_run":
             return job
         if job.process is not None and job.process.poll() is None:
+            if self._timed_out(job):
+                self.logger.warning("CP2K task %s exceeded walltime; terminating", task_id)
+                job.process.terminate()
+                try:
+                    job.process.wait(timeout=5.0)
+                except subprocess.TimeoutExpired:
+                    job.process.kill()
+                    job.process.wait(timeout=5.0)
+                job.status = "failed"
+                job.metadata["error"] = f"CP2K task exceeded max walltime of {self.max_walltime_seconds:.1f}s."
+                return self._retry_or_return(job)
             job.status = "running"
             return job
         if not job.output_file.exists():
             job.status = "failed"
             job.metadata["error"] = f"CP2K output was not produced: {job.output_file}"
+            self.logger.warning("CP2K task %s failed: %s", task_id, job.metadata["error"])
             return self._retry_or_return(job)
         output_text = job.output_file.read_text(encoding="utf-8", errors="ignore")
         if not _looks_converged(output_text):
             job.status = "failed"
             job.metadata["error"] = "CP2K output did not contain an SCF convergence marker."
+            self.logger.warning("CP2K task %s failed: %s", task_id, job.metadata["error"])
             return self._retry_or_return(job)
         region = job.metadata["region"]
         forces = parse_cp2k_forces(job.output_file)
@@ -139,6 +159,7 @@ class CP2KTaskSubmitter:
         )
         job.metadata["dataset_files"] = {key: str(path) for key, path in written.items()}
         job.status = "completed"
+        self.logger.info("CP2K task %s completed; dataset files written to %s", task_id, self.dataset_dir)
         return job
 
     def _prepare_region(self, task: ScheduledTask) -> ExtractedRegion:
@@ -155,8 +176,10 @@ class CP2KTaskSubmitter:
 
     def _submit_local(self, job: CP2KSubmittedJob) -> subprocess.Popen[str]:
         command = build_cp2k_command(job.input_file, config=self.config)
+        self.logger.info("submitting local CP2K task %s command=%s", job.task_id, command)
         stdout_handle = job.output_file.open("w", encoding="utf-8")
         stderr_handle = (job.work_dir / f"{job.input_file.stem}.err").open("w", encoding="utf-8")
+        job.started_at = time.monotonic()
         return subprocess.Popen(
             command,
             cwd=job.work_dir,
@@ -180,6 +203,7 @@ class CP2KTaskSubmitter:
         )
         script_path = job.work_dir / "submit.sbatch"
         script_path.write_text(script, encoding="utf-8")
+        self.logger.info("submitting Slurm CP2K task %s with %s", job.task_id, script_path)
         result = subprocess.run(["sbatch", str(script_path)], cwd=job.work_dir, check=True, text=True, capture_output=True)
         parts = result.stdout.strip().split()
         return parts[-1] if parts else None
@@ -191,9 +215,17 @@ class CP2KTaskSubmitter:
         retry_input = _input_with_adjusted_scf(job.input_file, attempt=job.attempts)
         job.input_file = retry_input
         job.output_file = job.work_dir / f"{retry_input.stem}.out"
+        self.logger.info("retrying CP2K task %s attempt=%d", job.task_id, job.attempts)
         job.process = self._submit_local(job)
         job.status = "submitted"
         return job
+
+    def _timed_out(self, job: CP2KSubmittedJob) -> bool:
+        return (
+            self.max_walltime_seconds is not None
+            and job.started_at is not None
+            and time.monotonic() - job.started_at > self.max_walltime_seconds
+        )
 
     def _job_payload(self, job: CP2KSubmittedJob) -> dict[str, Any]:
         return {
@@ -210,6 +242,26 @@ class CP2KTaskSubmitter:
 def _looks_converged(output_text: str) -> bool:
     markers = ("SCF run converged", "SCF converged", "ENERGY|")
     return any(marker in output_text for marker in markers)
+
+
+def _resolve_walltime_seconds(config: dict[str, Any]) -> float | None:
+    cp2k_cfg = config.get("cp2k", {})
+    raw = cp2k_cfg.get("max_walltime_seconds", cp2k_cfg.get("max_walltime", config.get("online", {}).get("max_walltime")))
+    if raw is None:
+        return None
+    if isinstance(raw, (int, float)):
+        return float(raw)
+    parts = str(raw).split(":")
+    try:
+        if len(parts) == 3:
+            hours, minutes, seconds = (float(part) for part in parts)
+            return hours * 3600 + minutes * 60 + seconds
+        if len(parts) == 2:
+            minutes, seconds = (float(part) for part in parts)
+            return minutes * 60 + seconds
+        return float(raw)
+    except ValueError:
+        return None
 
 
 def _input_with_adjusted_scf(input_file: Path, *, attempt: int) -> Path:

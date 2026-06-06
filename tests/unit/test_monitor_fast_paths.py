@@ -63,6 +63,15 @@ def test_linear_lj_fit_recovers_known_parameters() -> None:
     np.testing.assert_allclose(fit.sigma, sigma, rtol=1.0e-10, atol=1.0e-12)
 
 
+def test_linear_lj_fit_handles_singular_geometry() -> None:
+    vectors = np.array([[1.0, 0.0, 0.0], [2.0, 0.0, 0.0]], dtype=float)
+
+    fit = fit_local_lj_force_linear(vectors, np.array([1.0, 0.0, 0.0]))
+
+    assert not fit.valid
+    assert fit.residual == 1.0
+
+
 def test_score_physics_lazy_lj_only_fits_suspicious_atoms() -> None:
     atoms = Atoms(
         "H4",

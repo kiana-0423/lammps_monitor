@@ -14,6 +14,24 @@ from hotspot_al.models import EventRecord, FrameData
 from tests.fake_backends.fake_cp2k import write_fake_cp2k_force_output
 
 
+class _RunningProcess:
+    def __init__(self) -> None:
+        self.terminated = False
+        self.killed = False
+
+    def poll(self):
+        return None
+
+    def terminate(self) -> None:
+        self.terminated = True
+
+    def wait(self, timeout=None):
+        return 0
+
+    def kill(self) -> None:
+        self.killed = True
+
+
 def _task() -> ScheduledTask:
     atoms = Atoms("CH", positions=[[0.0, 0.0, 0.0], [1.1, 0.0, 0.0]], cell=np.diag([8.0, 8.0, 8.0]), pbc=True)
     frame = FrameData(atoms=atoms, step=12, forces=np.zeros((2, 3)))
@@ -57,3 +75,20 @@ def test_cp2k_task_submitter_poll_writes_dataset(tmp_path: Path) -> None:
     assert refreshed.status == "completed"
     assert (tmp_path / "labels" / "evt-cp2k.extxyz").is_file()
     assert "dataset_files" in refreshed.metadata
+
+
+def test_cp2k_task_submitter_marks_timed_out_local_job_failed(tmp_path: Path) -> None:
+    config = load_config()
+    config["cp2k"]["max_walltime_seconds"] = 0.0
+    submitter = CP2KTaskSubmitter(config=config, work_dir=tmp_path, mode="dry_run")
+    job = submitter.submit(_task())
+    process = _RunningProcess()
+    job.mode = "local"
+    job.process = process  # type: ignore[assignment]
+    job.started_at = 0.0
+
+    refreshed = submitter.poll_job("evt-cp2k")
+
+    assert refreshed.status == "failed"
+    assert process.terminated
+    assert "walltime" in refreshed.metadata["error"]

@@ -9,6 +9,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
+from hotspot_al.utils.logging import configure_logging
+
 
 SmokeTest = Callable[[Path], None]
 
@@ -32,6 +34,7 @@ class ModelRegistry:
         self.root_dir = Path(root_dir)
         self.root_dir.mkdir(parents=True, exist_ok=True)
         self.index_path = self.root_dir / "registry.json"
+        self.logger = configure_logging(name=__name__)
 
     def register_model(
         self,
@@ -80,8 +83,7 @@ class ModelRegistry:
         """Mark a version as deployed and optionally hot-reload inference."""
 
         model = self.get(version) if version is not None else self.latest()
-        if smoke_test is not None:
-            smoke_test(model.path)
+        (smoke_test or default_smoke_test)(model.path)
         index = self._load_index()
         index["deployed_version"] = model.version
         self._write_index(index)
@@ -89,6 +91,7 @@ class ModelRegistry:
             config.setdefault("allegro", {})["deployed_model_paths"] = [str(model.path)]
         if inference is not None and hasattr(inference, "reload"):
             inference.reload([model.path])
+        self.logger.info("deployed model version=%s path=%s", model.version, model.path)
         return model
 
     def rollback(
@@ -170,3 +173,14 @@ class ModelRegistry:
             validation_metrics=dict(data.get("validation_metrics") or {}),
             metadata=dict(data.get("metadata") or {}),
         )
+
+
+def default_smoke_test(model_path: Path) -> None:
+    """Basic deploy guard for model artifacts."""
+
+    if not model_path.is_file():
+        msg = f"Model artifact does not exist: {model_path}"
+        raise FileNotFoundError(msg)
+    if model_path.stat().st_size <= 0:
+        msg = f"Model artifact is empty: {model_path}"
+        raise ValueError(msg)

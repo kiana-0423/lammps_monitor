@@ -2,7 +2,7 @@
 
 `hotspot_al` 是一个面向大规模反应型 MLIP-MD 的局域热点主动学习研究原型。当前版本只支持 `Allegro` 作为 MLIP 后端，并围绕 `Allegro + LAMMPS + CP2K` 工作流组织代码。
 
-当前项目处于 research prototype / validation-in-progress 阶段：核心 Python 模块可测试、可导入，但真实 Allegro 在线推理、LAMMPS/CP2K 任务调度、生产级 retraining 闭环仍需要外部 runner、evaluator 或 HPC 适配层接入。
+当前项目处于 research prototype / validation-in-progress 阶段：核心 Python 模块可测试、可导入，在线监测、CP2K 标注提交、retraining 触发和模型版本部署的闭环编排已经实现。真实生产运行仍需要用户提供本机或 HPC 环境中的 Allegro、LAMMPS、CP2K 可执行程序、模型文件和训练/导出命令模板。
 
 方法名暂定为 `PHAL`：
 
@@ -192,6 +192,12 @@ pip install -e .
 pip install -e ".[viz]"
 ```
 
+真实在线 Allegro 推理可选依赖：
+
+```bash
+pip install -e ".[inference]"
+```
+
 如果只想安装基础运行依赖而不安装本地包：
 
 ```bash
@@ -215,7 +221,9 @@ pip install -r requirements.txt
 - `buffer` / `hotspot`：事件缓存和聚类半径；
 - `extraction`：cluster/slab/graph 截取参数；
 - `h_capping`：保守式补氢策略；
-- `cp2k`：functional、basis、cutoff、SCF、H-only optimization；
+- `cp2k`：functional、basis、cutoff、SCF、H-only optimization、submit mode、walltime；
+- `retraining` / `model_registry`：自动重训练触发和模型版本目录；
+- `logging`：日志级别和可选文件输出；
 - `training_mask`：core/buffer/boundary/H-cap 权重；
 - `candidate_pool`：去重与每轮上限。
 
@@ -228,7 +236,7 @@ pip install -r requirements.txt
 - `examples/05_write_allegro_dataset.py`
 - `examples/06_online_monitor.py`
 
-这些示例展示的是模块连接方式，不是完整生产流水线。示例中的 `dump.lammpstrj`、`trajectory.extxyz` 等输入文件需要用户替换为自己的数据路径，例如 `./data/trajectory.extxyz`。真实 Allegro、LAMMPS、CP2K 外部程序不会由这些示例自动配置。
+这些示例展示的是模块连接方式。示例中的 `dump.lammpstrj`、`trajectory.extxyz` 等输入文件需要用户替换为自己的数据路径，例如 `./data/trajectory.extxyz`。`examples/06_online_monitor.py` 默认使用 fake Allegro 和 CP2K dry-run；设置真实模型、LAMMPS/CP2K 可执行程序和命令模板后可作为在线流程入口。
 
 ## 测试覆盖
 

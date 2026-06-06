@@ -67,8 +67,13 @@ online:
   dump_file: dump.online.lammpstrj
   dump_freq: 10
   monitor_freq: 1
+  summary_interval: 100
   max_walltime: "24:00:00"
   event_dir: ./lammps_run/events
+
+logging:
+  level: INFO
+  file: null
 
 ood_score:
   weights:
@@ -138,6 +143,7 @@ cp2k:
   task_dir: ./cp2k_tasks
   labeled_dataset_dir: ./labeled_data
   max_retries: 0
+  max_walltime_seconds: null
   slurm_directives: ""
   functional: PBE
   basis: DZVP-MOLOPT-SR-GTH

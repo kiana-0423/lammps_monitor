@@ -182,7 +182,7 @@ class OODScorer:
             active_metrics = ("force", "delta_force", "rmin", "delta_q", "displacement")
             trigger_threshold = screen_threshold
         elif stage == "physics":
-            active_metrics = ("force", "delta_force", "rmin", "delta_q", "displacement", "lj_residual")
+            active_metrics = ("force", "delta_force", "rmin", "delta_q", "displacement", "lj_residual", "mlip_force_deviation")
             trigger_threshold = physics_threshold
         else:
             active_metrics = (

@@ -47,7 +47,10 @@ def fit_local_lj_force_linear(
     if abs(det) < 1.0e-12:
         return _invalid_fit()
 
-    alpha, beta = np.linalg.solve(gram, rhs)
+    try:
+        alpha, beta = np.linalg.solve(gram, rhs)
+    except np.linalg.LinAlgError:
+        return _invalid_fit()
     if alpha <= 0.0 or beta <= 0.0:
         return _invalid_fit()
 

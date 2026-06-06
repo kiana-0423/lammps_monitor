@@ -14,6 +14,7 @@ from hotspot_al.lammps.dump_parser import iter_lammps_dump
 from hotspot_al.lammps.lammps_input import write_full_lammps_input
 from hotspot_al.lammps.lammps_runner import build_lammps_command
 from hotspot_al.models import FrameData
+from hotspot_al.utils.logging import configure_logging
 
 
 class LAMMPSController:
@@ -37,6 +38,7 @@ class LAMMPSController:
         self.poll_interval = float(poll_interval)
         self.stderr_file = Path(stderr_file) if stderr_file is not None else self.work_dir / "lammps.stderr.log"
         self.process: subprocess.Popen[str] | None = None
+        self.logger = configure_logging(config, name=__name__)
         self._offset = 0
         self._queued_frames: list[FrameData] = []
 
@@ -86,6 +88,7 @@ class LAMMPSController:
             return
         self.work_dir.mkdir(parents=True, exist_ok=True)
         command = build_lammps_command(self.input_file, config=self.config)
+        self.logger.info("starting LAMMPS command=%s work_dir=%s", command, self.work_dir)
         stderr_handle = self.stderr_file.open("a", encoding="utf-8")
         self.process = subprocess.Popen(
             command,
@@ -101,12 +104,15 @@ class LAMMPSController:
 
         if self.process is None or self.process.poll() is not None:
             return
+        self.logger.info("stopping LAMMPS pid=%s", self.process.pid)
         self.process.terminate()
         try:
             self.process.wait(timeout=timeout)
         except subprocess.TimeoutExpired:
+            self.logger.warning("LAMMPS did not stop within %.1fs; killing pid=%s", timeout, self.process.pid)
             self.process.kill()
             self.process.wait(timeout=timeout)
+        self.logger.info("LAMMPS stopped with returncode=%s", self.process.returncode)
 
     def pause(self) -> None:
         if self.process is not None and self.process.poll() is None:
