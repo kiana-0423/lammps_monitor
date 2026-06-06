@@ -7,6 +7,7 @@ from ase import Atoms
 
 from hotspot_al.utils.geometry import row_norms
 from hotspot_al.utils.periodic import mic_displacement, mic_displacements_from_reference
+from hotspot_al.monitor.neighbor_utils import MonitorNeighbors
 
 
 def displacement_norms(
@@ -40,5 +41,20 @@ def minimum_neighbor_distances(atoms: Atoms) -> np.ndarray:
         distances = row_norms(displacements)
         distances[index] = np.inf
         minima[index] = float(np.min(distances))
+    minima[np.isinf(minima)] = 0.0
+    return minima
+
+
+def minimum_neighbor_distances_fast(atoms: Atoms, nl: MonitorNeighbors | None = None) -> np.ndarray:
+    """Return nearest-neighbor distances with an optional neighbor list."""
+
+    if nl is None:
+        return minimum_neighbor_distances(atoms)
+
+    minima = np.full(len(atoms), np.inf, dtype=float)
+    for index in range(len(atoms)):
+        _indices, _displacements, distances = nl.get_displacements(atoms, index, nl.cutoff)
+        if len(distances):
+            minima[index] = float(np.min(distances))
     minima[np.isinf(minima)] = 0.0
     return minima

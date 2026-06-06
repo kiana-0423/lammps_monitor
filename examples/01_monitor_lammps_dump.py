@@ -6,9 +6,10 @@ from pathlib import Path
 
 from hotspot_al.config import load_config
 from hotspot_al.io.lammps_reader import iter_dump
-from hotspot_al.monitor.coordination_monitor import coordination_deltas, smooth_coordination_numbers
+from hotspot_al.monitor.coordination_monitor import coordination_deltas, smooth_coordination_numbers_fast
 from hotspot_al.monitor.force_monitor import delta_force_norms, force_norms
-from hotspot_al.monitor.geometry_monitor import displacement_norms, minimum_neighbor_distances
+from hotspot_al.monitor.geometry_monitor import displacement_norms, minimum_neighbor_distances_fast
+from hotspot_al.monitor.neighbor_utils import MonitorNeighbors
 from hotspot_al.monitor.ood_score import OODScorer
 
 
@@ -18,6 +19,7 @@ def main() -> None:
     previous_positions = None
     previous_forces = None
     previous_q = None
+    neighbors = None
     for frame in iter_dump(
         Path("dump.lammpstrj"),
         type_map=config["lammps"]["type_map"],
@@ -25,7 +27,16 @@ def main() -> None:
     ):
         if frame.forces is None:
             raise ValueError("LAMMPS dump must contain fx fy fz for this example.")
-        q_values = smooth_coordination_numbers(frame.atoms)
+        if neighbors is None:
+            monitor_cfg = config["monitor"]
+            neighbors = MonitorNeighbors(
+                frame.atoms,
+                lj_cutoff=monitor_cfg.get("lj_cutoff", 6.0),
+                coordination_cutoff=monitor_cfg.get("coordination_cutoff", monitor_cfg.get("lj_cutoff", 6.0)),
+            )
+        else:
+            neighbors.rebuild(frame.atoms)
+        q_values = smooth_coordination_numbers_fast(frame.atoms, neighbors)
         metrics = {
             "force": force_norms(frame.forces),
             "delta_force": delta_force_norms(frame.forces, previous_forces),
@@ -35,7 +46,7 @@ def main() -> None:
                 cell=frame.atoms.cell.array,
                 pbc=frame.atoms.pbc,
             ),
-            "rmin": minimum_neighbor_distances(frame.atoms),
+            "rmin": minimum_neighbor_distances_fast(frame.atoms, neighbors),
             "delta_q": coordination_deltas(q_values, previous_q),
         }
         result = scorer.score_light(metrics, metadata={"backend": config["backend"]["mlip"]})

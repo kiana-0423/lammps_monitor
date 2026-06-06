@@ -72,6 +72,7 @@ ood_score:
   screen_threshold: 4.0
   physics_threshold: 5.0
   label_threshold: 6.0
+  lj_lazy_threshold: 3.0
   min_trigger_atoms: 1
   running_stats:
     enabled: true

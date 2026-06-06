@@ -8,6 +8,8 @@ from typing import Any
 import numpy as np
 
 from hotspot_al.models import OODFrameResult
+from hotspot_al.monitor.lj_residual_fast import compute_lj_residuals_fast
+from hotspot_al.monitor.neighbor_utils import MonitorNeighbors
 
 
 _REASON_MAP = {
@@ -51,6 +53,7 @@ class OODScorer:
 
     config: dict[str, Any]
     stats: dict[str, RunningMetricStats] = field(default_factory=dict)
+    neighbors: MonitorNeighbors | None = None
 
     def __post_init__(self) -> None:
         for name in ("force", "delta_force", "rmin", "delta_q", "lj_residual", "committee", "displacement"):
@@ -74,6 +77,45 @@ class OODScorer:
             return np.clip((threshold - values) / max(abs(threshold), 1.0e-8), 0.0, None)
         return np.clip((values - threshold) / max(abs(threshold), 1.0e-8), 0.0, None)
 
+    def _get_neighbors(self, atoms: Any) -> MonitorNeighbors:
+        monitor_cfg = self.config.get("monitor", {})
+        lj_cutoff = float(monitor_cfg.get("lj_cutoff", 6.0))
+        coordination_cutoff = float(monitor_cfg.get("coordination_cutoff", lj_cutoff))
+        if self.neighbors is None or len(atoms) != self.neighbors.n_atoms:
+            self.neighbors = MonitorNeighbors(atoms, lj_cutoff=lj_cutoff, coordination_cutoff=coordination_cutoff)
+        else:
+            self.neighbors.rebuild(atoms)
+        return self.neighbors
+
+    def _light_metric_scores(
+        self,
+        metrics: dict[str, np.ndarray],
+        force_values: np.ndarray,
+    ) -> dict[str, np.ndarray]:
+        monitor_cfg = self.config.get("monitor", {})
+        delta_force_values = np.asarray(metrics.get("delta_force", np.zeros_like(force_values)), dtype=float)
+        rmin_values = np.asarray(metrics.get("rmin", np.zeros_like(force_values)), dtype=float)
+        delta_q_values = np.asarray(metrics.get("delta_q", np.zeros_like(force_values)), dtype=float)
+        displacement_values = np.asarray(metrics.get("displacement", np.zeros_like(force_values)), dtype=float)
+
+        return {
+            "force": self._z_score("force", force_values),
+            "delta_force": self._z_score("delta_force", delta_force_values),
+            "rmin": self._threshold_score(
+                rmin_values,
+                monitor_cfg.get("rmin_threshold"),
+                lower_is_worse=True,
+            ),
+            "delta_q": np.maximum(
+                self._z_score("delta_q", delta_q_values),
+                self._threshold_score(delta_q_values, monitor_cfg.get("delta_q_threshold")),
+            ),
+            "displacement": np.maximum(
+                self._z_score("displacement", displacement_values),
+                self._threshold_score(displacement_values, monitor_cfg.get("displacement_z_threshold")),
+            ),
+        }
+
     def score_frame(
         self,
         metrics: dict[str, np.ndarray],
@@ -81,42 +123,46 @@ class OODScorer:
         stage: str = "full",
         update_stats: bool = True,
         metadata: dict[str, Any] | None = None,
+        atoms: Any | None = None,
+        forces: np.ndarray | None = None,
     ) -> OODFrameResult:
         """Score one frame from precomputed atom-wise metrics."""
 
-        monitor_cfg = self.config.get("monitor", {})
         weights = self.config.get("ood_score", {}).get("weights", {})
         score_cfg = self.config.get("ood_score", {})
+        metrics_for_stats = metrics
         screen_threshold = float(score_cfg.get("screen_threshold", 4.0))
         physics_threshold = float(score_cfg.get("physics_threshold", 5.0))
         label_threshold = float(score_cfg.get("label_threshold", 6.0))
         min_trigger_atoms = int(self.config.get("ood_score", {}).get("min_trigger_atoms", 1))
+        lj_lazy_threshold = float(score_cfg.get("lj_lazy_threshold", 3.0))
 
         metric_scores: dict[str, np.ndarray] = {}
 
         force_values = np.asarray(metrics.get("force", np.zeros(0)), dtype=float)
-        delta_force_values = np.asarray(metrics.get("delta_force", np.zeros_like(force_values)), dtype=float)
-        rmin_values = np.asarray(metrics.get("rmin", np.zeros_like(force_values)), dtype=float)
-        delta_q_values = np.asarray(metrics.get("delta_q", np.zeros_like(force_values)), dtype=float)
         lj_values = np.asarray(metrics.get("lj_residual", np.zeros_like(force_values)), dtype=float)
         committee_values = np.asarray(metrics.get("committee", np.zeros_like(force_values)), dtype=float)
-        displacement_values = np.asarray(metrics.get("displacement", np.zeros_like(force_values)), dtype=float)
 
-        metric_scores["force"] = self._z_score("force", force_values)
-        metric_scores["delta_force"] = self._z_score("delta_force", delta_force_values)
-        metric_scores["rmin"] = self._threshold_score(
-            rmin_values,
-            monitor_cfg.get("rmin_threshold"),
-            lower_is_worse=True,
-        )
-        metric_scores["delta_q"] = np.maximum(
-            self._z_score("delta_q", delta_q_values),
-            self._threshold_score(delta_q_values, monitor_cfg.get("delta_q_threshold")),
-        )
-        metric_scores["displacement"] = np.maximum(
-            self._z_score("displacement", displacement_values),
-            self._threshold_score(displacement_values, monitor_cfg.get("displacement_z_threshold")),
-        )
+        metric_scores.update(self._light_metric_scores(metrics, force_values))
+        lj_fit_count = 0
+        if stage in {"physics", "full"} and atoms is not None and forces is not None and "lj_residual" not in metrics:
+            light_total = np.zeros_like(force_values, dtype=float)
+            for name in ("force", "delta_force", "rmin", "delta_q", "displacement"):
+                light_total += float(weights.get(name, 0.0)) * metric_scores[name]
+            suspicious_mask = light_total >= lj_lazy_threshold
+            if not np.any(suspicious_mask) and len(force_values):
+                suspicious_mask[int(np.argmax(light_total))] = bool(np.max(light_total) > 0.0)
+            nl = self._get_neighbors(atoms)
+            monitor_cfg = self.config.get("monitor", {})
+            lj_values, _fits = compute_lj_residuals_fast(
+                atoms,
+                forces,
+                nl,
+                cutoff=float(monitor_cfg.get("lj_cutoff", 6.0)),
+                suspicious_mask=suspicious_mask,
+            )
+            lj_fit_count = int(np.sum(suspicious_mask))
+            metrics_for_stats = {**metrics, "lj_residual": lj_values}
         metric_scores["lj_residual"] = np.maximum(lj_values, self._z_score("lj_residual", lj_values))
         metric_scores["committee"] = np.maximum(committee_values, self._z_score("committee", committee_values))
 
@@ -155,12 +201,14 @@ class OODScorer:
                 "screen_threshold": screen_threshold,
                 "physics_threshold": physics_threshold,
                 "label_threshold": label_threshold,
+                "lj_lazy_threshold": lj_lazy_threshold,
+                "lj_fit_count": lj_fit_count,
                 **(metadata or {}),
             },
         )
 
         if update_stats:
-            for name, values in metrics.items():
+            for name, values in metrics_for_stats.items():
                 if name in self.stats and len(values):
                     self.stats[name].update(np.asarray(values, dtype=float))
         return result
@@ -170,15 +218,45 @@ class OODScorer:
 
         return self.score_frame(metrics, stage="light", update_stats=update_stats, metadata=metadata)
 
-    def score_physics(self, metrics: dict[str, np.ndarray], *, update_stats: bool = True, metadata: dict[str, Any] | None = None) -> OODFrameResult:
+    def score_physics(
+        self,
+        metrics: dict[str, np.ndarray],
+        *,
+        update_stats: bool = True,
+        metadata: dict[str, Any] | None = None,
+        atoms: Any | None = None,
+        forces: np.ndarray | None = None,
+    ) -> OODFrameResult:
         """Stage 2 physics-aware monitoring."""
 
-        return self.score_frame(metrics, stage="physics", update_stats=update_stats, metadata=metadata)
+        return self.score_frame(
+            metrics,
+            stage="physics",
+            update_stats=update_stats,
+            metadata=metadata,
+            atoms=atoms,
+            forces=forces,
+        )
 
-    def score_full(self, metrics: dict[str, np.ndarray], *, update_stats: bool = True, metadata: dict[str, Any] | None = None) -> OODFrameResult:
+    def score_full(
+        self,
+        metrics: dict[str, np.ndarray],
+        *,
+        update_stats: bool = True,
+        metadata: dict[str, Any] | None = None,
+        atoms: Any | None = None,
+        forces: np.ndarray | None = None,
+    ) -> OODFrameResult:
         """Stage 3 committee-confirmed monitoring."""
 
-        return self.score_frame(metrics, stage="full", update_stats=update_stats, metadata=metadata)
+        return self.score_frame(
+            metrics,
+            stage="full",
+            update_stats=update_stats,
+            metadata=metadata,
+            atoms=atoms,
+            forces=forces,
+        )
 
     def _infer_reasons(self, metric_scores: dict[str, np.ndarray], hotspot_indices: list[int]) -> list[str]:
         if not metric_scores:

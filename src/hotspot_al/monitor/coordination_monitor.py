@@ -7,6 +7,7 @@ from ase import Atoms
 from ase.data import covalent_radii
 
 from hotspot_al.utils.periodic import mic_displacements_from_reference
+from hotspot_al.monitor.neighbor_utils import MonitorNeighbors
 
 
 def smooth_coordination_numbers(
@@ -29,6 +30,32 @@ def smooth_coordination_numbers(
         radii = scale * (covalent_radii[numbers[i]] + covalent_radii[numbers])
         weights = 1.0 / (1.0 + np.power(distances / radii, power))
         weights[i] = 0.0
+        q_values[i] = float(np.sum(weights))
+    return q_values
+
+
+def smooth_coordination_numbers_fast(
+    atoms: Atoms,
+    nl: MonitorNeighbors | None = None,
+    *,
+    scale: float = 1.15,
+    power: int = 6,
+    cutoff: float | None = None,
+) -> np.ndarray:
+    """Compute smooth coordination numbers with an optional neighbor list."""
+
+    if nl is None:
+        return smooth_coordination_numbers(atoms, scale=scale, power=power)
+
+    numbers = atoms.get_atomic_numbers()
+    q_values = np.zeros(len(atoms), dtype=float)
+    sub_cutoff = nl.coordination_cutoff if cutoff is None else float(cutoff)
+    for i in range(len(atoms)):
+        indices, _displacements, distances = nl.get_displacements(atoms, i, sub_cutoff)
+        if len(indices) == 0:
+            continue
+        radii = scale * (covalent_radii[numbers[i]] + covalent_radii[numbers[indices]])
+        weights = 1.0 / (1.0 + np.power(distances / radii, power))
         q_values[i] = float(np.sum(weights))
     return q_values
 
