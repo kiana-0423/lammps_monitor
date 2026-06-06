@@ -32,6 +32,7 @@ lammps:
 
 allegro:
   enabled: true
+  device: cpu
   model_paths:
     - allegro_000.pth
     - allegro_001.pth
@@ -60,6 +61,15 @@ monitor:
   coordination_scale: 1.15
   lj_cutoff: 6.0
 
+online:
+  enabled: false
+  work_dir: ./lammps_run
+  dump_file: dump.online.lammpstrj
+  dump_freq: 10
+  monitor_freq: 1
+  max_walltime: "24:00:00"
+  event_dir: ./lammps_run/events
+
 ood_score:
   weights:
     force: 1.0
@@ -69,6 +79,7 @@ ood_score:
     lj_residual: 2.0
     committee: 2.0
     displacement: 1.0
+    mlip_force_deviation: 2.0
   screen_threshold: 4.0
   physics_threshold: 5.0
   label_threshold: 6.0

@@ -20,6 +20,7 @@ _REASON_MAP = {
     "lj_residual": "lj_residual",
     "committee": "committee_deviation",
     "displacement": "trajectory_jump",
+    "mlip_force_deviation": "model_drift",
 }
 
 
@@ -56,7 +57,16 @@ class OODScorer:
     neighbors: MonitorNeighbors | None = None
 
     def __post_init__(self) -> None:
-        for name in ("force", "delta_force", "rmin", "delta_q", "lj_residual", "committee", "displacement"):
+        for name in (
+            "force",
+            "delta_force",
+            "rmin",
+            "delta_q",
+            "lj_residual",
+            "committee",
+            "displacement",
+            "mlip_force_deviation",
+        ):
             self.stats.setdefault(name, RunningMetricStats())
 
     def _z_score(self, name: str, values: np.ndarray) -> np.ndarray:
@@ -142,6 +152,7 @@ class OODScorer:
         force_values = np.asarray(metrics.get("force", np.zeros(0)), dtype=float)
         lj_values = np.asarray(metrics.get("lj_residual", np.zeros_like(force_values)), dtype=float)
         committee_values = np.asarray(metrics.get("committee", np.zeros_like(force_values)), dtype=float)
+        mlip_deviation_values = np.asarray(metrics.get("mlip_force_deviation", np.zeros_like(force_values)), dtype=float)
 
         metric_scores.update(self._light_metric_scores(metrics, force_values))
         lj_fit_count = 0
@@ -165,6 +176,7 @@ class OODScorer:
             metrics_for_stats = {**metrics, "lj_residual": lj_values}
         metric_scores["lj_residual"] = np.maximum(lj_values, self._z_score("lj_residual", lj_values))
         metric_scores["committee"] = np.maximum(committee_values, self._z_score("committee", committee_values))
+        metric_scores["mlip_force_deviation"] = self._z_score("mlip_force_deviation", mlip_deviation_values)
 
         if stage == "light":
             active_metrics = ("force", "delta_force", "rmin", "delta_q", "displacement")
@@ -173,7 +185,16 @@ class OODScorer:
             active_metrics = ("force", "delta_force", "rmin", "delta_q", "displacement", "lj_residual")
             trigger_threshold = physics_threshold
         else:
-            active_metrics = ("force", "delta_force", "rmin", "delta_q", "displacement", "lj_residual", "committee")
+            active_metrics = (
+                "force",
+                "delta_force",
+                "rmin",
+                "delta_q",
+                "displacement",
+                "lj_residual",
+                "committee",
+                "mlip_force_deviation",
+            )
             trigger_threshold = label_threshold
 
         atom_scores = np.zeros_like(force_values, dtype=float)

@@ -155,7 +155,11 @@ def iter_lammps_dump(
 ) -> Iterator[FrameData]:
     """Iterate over a LAMMPS custom dump file."""
 
-    lines = Path(path).read_text(encoding="utf-8").splitlines()
+    if hasattr(path, "read_text"):
+        text = path.read_text(encoding="utf-8")
+    else:
+        text = Path(path).read_text(encoding="utf-8")
+    lines = text.splitlines()
     cursor = 0
     while cursor < len(lines):
         if not lines[cursor].startswith("ITEM: TIMESTEP"):
