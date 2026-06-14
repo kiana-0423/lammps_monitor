@@ -3,12 +3,21 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from dataclasses import dataclass
 from typing import Any
 
 from hotspot_al.exceptions import ConfigError
 
 
 Schema = Mapping[str, Any]
+
+
+@dataclass(frozen=True, slots=True)
+class DictOf:
+    """Schema marker for dictionaries with arbitrary keys and typed values."""
+
+    key_type: Any
+    value_type: Any
 
 
 CONFIG_SCHEMA: Schema = {
@@ -44,6 +53,7 @@ CONFIG_SCHEMA: Schema = {
         "lammps_pair_style": str,
         "committee_mode": str,
     },
+    "allegro_model_input": dict,
     "monitor": {
         "light_interval": int,
         "physics_interval": (str, int),
@@ -63,11 +73,20 @@ CONFIG_SCHEMA: Schema = {
         "dump_file": str,
         "dump_freq": int,
         "monitor_freq": int,
+        "summary_interval": int,
+        "progress_file": (str, type(None)),
+        "continue_on_error": bool,
+        "max_errors": int,
         "max_walltime": str,
         "event_dir": str,
     },
+    "logging": {
+        "level": (str, int),
+        "file": (str, type(None)),
+        "format": str,
+    },
     "ood_score": {
-        "weights": dict,
+        "weights": DictOf(str, (int, float)),
         "screen_threshold": (int, float),
         "physics_threshold": (int, float),
         "label_threshold": (int, float),
@@ -98,8 +117,14 @@ CONFIG_SCHEMA: Schema = {
         "max_atoms": int,
         "min_atoms": int,
         "vacuum_padding": (int, float),
-        "slab": dict,
-        "graph": dict,
+        "slab": {
+            "lx": (int, float),
+            "ly": (int, float),
+            "z_margin": (int, float),
+        },
+        "graph": {
+            "hops": int,
+        },
     },
     "h_capping": {
         "enabled": bool,
@@ -108,10 +133,16 @@ CONFIG_SCHEMA: Schema = {
         "optimize_h_only": bool,
         "disabled_for_metals": bool,
         "disabled_for_oxides_by_default": bool,
-        "bond_lengths": dict,
+        "bond_lengths": DictOf(str, (int, float)),
     },
     "cp2k": {
         "executable": str,
+        "submit_mode": str,
+        "task_dir": str,
+        "labeled_dataset_dir": str,
+        "max_retries": int,
+        "max_walltime_seconds": (int, float, type(None)),
+        "slurm_directives": str,
         "functional": str,
         "basis": str,
         "potential": str,
@@ -125,26 +156,62 @@ CONFIG_SCHEMA: Schema = {
         "max_scf": int,
         "use_ot": bool,
         "dispersion": bool,
-        "h_only_opt": dict,
-        "single_point": dict,
+        "h_only_opt": {
+            "enabled": bool,
+            "max_iter": int,
+        },
+        "single_point": {
+            "enabled": bool,
+            "print_forces": bool,
+        },
     },
-    "training_mask": dict,
-    "candidate_pool": dict,
+    "retraining": {
+        "min_new_samples": int,
+        "interval_hours": (int, float),
+        "dry_run": bool,
+        "state_path": str,
+        "export_dir": str,
+    },
+    "model_registry": {
+        "root_dir": str,
+    },
+    "training_mask": {
+        "core": (int, float),
+        "inner_buffer": (int, float),
+        "outer_buffer": (int, float),
+        "boundary": (int, float),
+        "h_cap": (int, float),
+        "energy_weight": (int, float),
+        "stress_weight": (int, float),
+    },
+    "candidate_pool": {
+        "deduplicate": bool,
+        "max_candidates_per_round": int,
+        "fingerprint": str,
+        "diversity_threshold": (int, float),
+    },
 }
 
 
-def validate_config(config: dict[str, Any]) -> dict[str, Any]:
+def validate_config(config: dict[str, Any], *, allow_unknown: bool = False) -> dict[str, Any]:
     """Validate the known config schema and return ``config`` unchanged."""
 
     if not isinstance(config, dict):
         msg = f"config must be dict, got {type(config).__name__}"
         raise ConfigError(msg)
-    _validate_mapping(config, CONFIG_SCHEMA, path="")
+    _validate_mapping(config, CONFIG_SCHEMA, path="", allow_unknown=allow_unknown)
     _validate_ranges(config)
     return config
 
 
-def _validate_mapping(config: Mapping[str, Any], schema: Schema, *, path: str) -> None:
+def _validate_mapping(config: Mapping[str, Any], schema: Schema, *, path: str, allow_unknown: bool) -> None:
+    if not allow_unknown:
+        extra_keys = sorted(set(config) - set(schema))
+        if extra_keys:
+            dotted = path or "config"
+            joined = ", ".join(str(key) for key in extra_keys)
+            msg = f"Unknown config key(s) under {dotted}: {joined}"
+            raise ConfigError(msg)
     for key, expected in schema.items():
         dotted = f"{path}.{key}" if path else key
         if key not in config:
@@ -155,10 +222,28 @@ def _validate_mapping(config: Mapping[str, Any], schema: Schema, *, path: str) -
             if not isinstance(value, Mapping):
                 msg = f"{dotted} must be dict, got {type(value).__name__}"
                 raise ConfigError(msg)
-            _validate_mapping(value, expected, path=dotted)
+            _validate_mapping(value, expected, path=dotted, allow_unknown=allow_unknown)
+        elif isinstance(expected, DictOf):
+            _validate_dict_of(value, expected, path=dotted)
         elif not _matches_type(value, expected):
             expected_name = _type_name(expected)
             msg = f"{dotted} must be {expected_name}, got {type(value).__name__}"
+            raise ConfigError(msg)
+
+
+def _validate_dict_of(value: Any, expected: DictOf, *, path: str) -> None:
+    if not isinstance(value, Mapping):
+        msg = f"{path} must be dict, got {type(value).__name__}"
+        raise ConfigError(msg)
+    for key, item in value.items():
+        key_path = f"{path}.{key}"
+        if not _matches_type(key, expected.key_type):
+            expected_name = _type_name(expected.key_type)
+            msg = f"{key_path} key must be {expected_name}, got {type(key).__name__}"
+            raise ConfigError(msg)
+        if not _matches_type(item, expected.value_type):
+            expected_name = _type_name(expected.value_type)
+            msg = f"{key_path} must be {expected_name}, got {type(item).__name__}"
             raise ConfigError(msg)
 
 
@@ -183,6 +268,7 @@ def _validate_ranges(config: Mapping[str, Any]) -> None:
         ("lammps", "timestep_fs"),
         ("online", "dump_freq"),
         ("online", "monitor_freq"),
+        ("online", "max_errors"),
         ("buffer", "pre_trigger_frames"),
         ("buffer", "post_trigger_frames"),
         ("monitor", "lj_cutoff"),
@@ -190,6 +276,10 @@ def _validate_ranges(config: Mapping[str, Any]) -> None:
         ("extraction", "max_atoms"),
         ("extraction", "min_atoms"),
         ("cp2k", "max_scf"),
+        ("cp2k", "h_only_opt", "max_iter"),
+        ("retraining", "min_new_samples"),
+        ("retraining", "interval_hours"),
+        ("candidate_pool", "max_candidates_per_round"),
     )
     for path in positive_paths:
         value = _get_path(config, path)

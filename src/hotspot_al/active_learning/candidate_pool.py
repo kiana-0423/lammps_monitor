@@ -14,6 +14,7 @@ class CandidatePool:
 
     diversity_threshold: float = 0.1
     max_candidates: int = 50
+    deduplicate: bool = True
     candidates: list[CandidateFingerprint] = field(default_factory=list)
 
     def add(self, region: ExtractedRegion, *, score: float, metadata: dict | None = None) -> None:
@@ -23,5 +24,7 @@ class CandidatePool:
         )
 
     def select(self) -> list[CandidateFingerprint]:
+        if not self.deduplicate:
+            return sorted(self.candidates, key=lambda item: item.score, reverse=True)[: self.max_candidates]
         unique = deduplicate_candidates(self.candidates, diversity_threshold=self.diversity_threshold)
         return unique[: self.max_candidates]

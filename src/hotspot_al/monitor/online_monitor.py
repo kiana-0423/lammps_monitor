@@ -69,46 +69,65 @@ class OnlineMonitor:
         self.scheduler = scheduler
         self.progress_callback = progress_callback
         self.summary_interval = max(0, int(online_cfg.get("summary_interval", 0)))
+        progress_file = online_cfg.get("progress_file")
+        self.progress_file = None if progress_file is None else Path(progress_file)
+        self.continue_on_error = bool(online_cfg.get("continue_on_error", False))
+        self.max_errors = max(1, int(online_cfg.get("max_errors", 1)))
         self._previous_positions: np.ndarray | None = None
         self._previous_forces: np.ndarray | None = None
         self._previous_q: np.ndarray | None = None
         self._neighbors: MonitorNeighbors | None = None
         self._last_event_step: int | None = None
-        self._stats = {"processed_frames": 0, "triggered_frames": 0, "events": 0, "full_frames": 0, "light_frames": 0}
+        self._stats = {
+            "processed_frames": 0,
+            "triggered_frames": 0,
+            "events": 0,
+            "full_frames": 0,
+            "light_frames": 0,
+            "errors": 0,
+        }
 
     def run(self, *, max_frames: int | None = None, frame_timeout: float | None = None) -> list[OODFrameResult]:
         """Process frames until the source is exhausted or ``max_frames`` is reached."""
 
         results: list[OODFrameResult] = []
         processed = 0
+        consecutive_errors = 0
         self.logger.info("starting online monitor")
         try:
             while max_frames is None or processed < max_frames:
-                frame = self._next_frame(timeout=frame_timeout)
-                if frame is None:
-                    self.logger.info("frame source exhausted after %d frames", processed)
-                    break
-                result = self.process_frame(frame, frame_index=processed)
-                results.append(result)
-                self._record_progress(result)
-                event = self.buffer.push(frame)
-                finalized_event = event is not None
-                if event is not None:
-                    self._handle_event(event)
-                if result.triggered and not finalized_event and self._last_event_step != frame.step:
-                    completed = self.buffer.capture_event(
-                        frame,
-                        hotspot_atoms=result.hotspot_indices,
-                        ood_scores=result.atom_scores,
-                        trigger_reason=result.trigger_reason,
-                        backend=self.config.get("backend", {}).get("mlip"),
-                        model_version=self._model_version(),
-                        metadata={"ood": result.metadata},
-                    )
-                    self._last_event_step = frame.step
-                    if completed is not None:
-                        self._handle_event(completed)
-                processed += 1
+                try:
+                    frame = self._next_frame(timeout=frame_timeout)
+                    if frame is None:
+                        self.logger.info("frame source exhausted after %d frames", processed)
+                        break
+                    result = self.process_frame(frame, frame_index=processed)
+                    results.append(result)
+                    self._record_progress(result)
+                    event = self.buffer.push(frame)
+                    finalized_event = event is not None
+                    if event is not None:
+                        self._handle_event(event)
+                    if result.triggered and not finalized_event and self._last_event_step != frame.step:
+                        completed = self.buffer.capture_event(
+                            frame,
+                            hotspot_atoms=result.hotspot_indices,
+                            ood_scores=result.atom_scores,
+                            trigger_reason=result.trigger_reason,
+                            backend=self.config.get("backend", {}).get("mlip"),
+                            model_version=self._model_version(),
+                            metadata={"ood": result.metadata},
+                        )
+                        self._last_event_step = frame.step
+                        if completed is not None:
+                            self._handle_event(completed)
+                    processed += 1
+                    consecutive_errors = 0
+                except Exception:
+                    consecutive_errors += 1
+                    self._record_error(processed, consecutive_errors)
+                    if not self.continue_on_error or consecutive_errors >= self.max_errors:
+                        raise
         except KeyboardInterrupt:
             self.logger.info("online monitor interrupted after %d frames", processed)
             pass
@@ -225,8 +244,7 @@ class OnlineMonitor:
         else:
             self._stats["light_frames"] += 1
         payload = {**self._stats, "last_stage": result.stage, "last_max_score": result.max_score}
-        if self.progress_callback is not None:
-            self.progress_callback(payload)
+        self._emit_progress(payload)
         if self.summary_interval and self._stats["processed_frames"] % self.summary_interval == 0:
             self.logger.info(
                 "monitor progress frames=%d triggers=%d events=%d full=%d light=%d",
@@ -237,11 +255,36 @@ class OnlineMonitor:
                 self._stats["light_frames"],
             )
 
+    def _record_error(self, frame_index: int, consecutive_errors: int) -> None:
+        self._stats["errors"] += 1
+        self.logger.exception(
+            "online monitor error at frame_index=%d consecutive_errors=%d continue_on_error=%s",
+            frame_index,
+            consecutive_errors,
+            self.continue_on_error,
+        )
+        self._emit_progress(
+            {
+                **self._stats,
+                "last_stage": "error",
+                "last_max_score": None,
+                "frame_index": frame_index,
+                "consecutive_errors": consecutive_errors,
+            }
+        )
+
+    def _emit_progress(self, payload: dict[str, Any]) -> None:
+        if self.progress_callback is not None:
+            self.progress_callback(payload)
+        if self.progress_file is not None:
+            self.progress_file.parent.mkdir(parents=True, exist_ok=True)
+            self.progress_file.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
     def _next_frame(self, *, timeout: float | None) -> FrameData | None:
         if hasattr(self.frame_source, "next_frame"):
-            return self.frame_source.next_frame(timeout=timeout)  # type: ignore[union-attr]
+            return self.frame_source.next_frame(timeout=timeout)
         if not hasattr(self, "_frame_iterator"):
-            self._frame_iterator = iter(self.frame_source)  # type: ignore[arg-type]
+            self._frame_iterator = iter(self.frame_source)
         return next(self._frame_iterator, None)
 
     def _ensure_neighbors(self, atoms: Any) -> None:

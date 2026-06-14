@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import pytest
+
+from hotspot_al.exceptions import LAMMPSRuntimeError
 from hotspot_al.lammps.lammps_controller import LAMMPSController
 
 
@@ -50,3 +53,22 @@ def test_lammps_controller_waits_for_complete_streaming_frame(tmp_path) -> None:
     assert frame.step == 0
     assert len(frame.atoms) == 1
     assert frame.forces[0, 0] == 1.0
+
+
+class _ExitedProcess:
+    def poll(self) -> int:
+        return 2
+
+
+def test_lammps_controller_reports_nonzero_process_exit(tmp_path) -> None:
+    controller = LAMMPSController(
+        tmp_path / "in.lammps",
+        dump_file=tmp_path / "dump.online.lammpstrj",
+        work_dir=tmp_path,
+        config={"lammps": {"type_map": {1: "H"}, "timestep_fs": 0.5}},
+        poll_interval=0.0,
+    )
+    controller.process = _ExitedProcess()  # type: ignore[assignment]
+
+    with pytest.raises(LAMMPSRuntimeError, match="returncode=2"):
+        controller.next_frame(timeout=0.0)

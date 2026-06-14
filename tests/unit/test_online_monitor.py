@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 
@@ -19,6 +20,17 @@ class CountingEvaluator:
 
     def __call__(self, atoms: Atoms, model_path: str | Path | None, config: dict[str, Any]) -> np.ndarray:
         self.calls += 1
+        return np.zeros((len(atoms), 3), dtype=float)
+
+
+class FailingOnceEvaluator:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def __call__(self, atoms: Atoms, model_path: str | Path | None, config: dict[str, Any]) -> np.ndarray:
+        self.calls += 1
+        if self.calls == 1:
+            raise RuntimeError("inference failed")
         return np.zeros((len(atoms), 3), dtype=float)
 
 
@@ -121,3 +133,41 @@ def test_online_monitor_progress_callback_reports_frames() -> None:
 
     assert [item["processed_frames"] for item in progress] == [1, 2]
     assert progress[-1]["triggered_frames"] >= 1
+
+
+def test_online_monitor_writes_progress_file(tmp_path: Path) -> None:
+    config = _config()
+    config["online"]["progress_file"] = str(tmp_path / "progress.json")
+    monitor = OnlineMonitor(
+        config=config,
+        runner=AllegroRunner(force_evaluator=CountingEvaluator()),
+        frame_source=[_frame(0, 2.0)],
+        on_event=lambda _event: None,
+    )
+
+    monitor.run()
+
+    payload = json.loads((tmp_path / "progress.json").read_text(encoding="utf-8"))
+    assert payload["processed_frames"] == 1
+    assert payload["last_stage"] == "full"
+
+
+def test_online_monitor_can_continue_after_frame_errors() -> None:
+    config = _config()
+    config["online"]["continue_on_error"] = True
+    config["online"]["max_errors"] = 2
+    progress: list[dict[str, Any]] = []
+    monitor = OnlineMonitor(
+        config=config,
+        runner=AllegroRunner(force_evaluator=FailingOnceEvaluator()),
+        frame_source=[_frame(0, 2.0), _frame(1, 2.0)],
+        on_event=lambda _event: None,
+        progress_callback=progress.append,
+    )
+
+    results = monitor.run()
+
+    assert len(results) == 1
+    assert progress[0]["last_stage"] == "error"
+    assert progress[0]["errors"] == 1
+    assert progress[-1]["processed_frames"] == 1

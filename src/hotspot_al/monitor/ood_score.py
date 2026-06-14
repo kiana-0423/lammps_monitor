@@ -178,6 +178,7 @@ class OODScorer:
         metric_scores["committee"] = np.maximum(committee_values, self._z_score("committee", committee_values))
         metric_scores["mlip_force_deviation"] = self._z_score("mlip_force_deviation", mlip_deviation_values)
 
+        active_metrics: tuple[str, ...]
         if stage == "light":
             active_metrics = ("force", "delta_force", "rmin", "delta_q", "displacement")
             trigger_threshold = screen_threshold

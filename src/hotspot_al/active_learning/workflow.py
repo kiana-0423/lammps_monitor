@@ -60,6 +60,7 @@ def build_candidate_pool(frames: list[tuple[FrameData, OODFrameResult]], *, conf
     pool = CandidatePool(
         diversity_threshold=float(pool_cfg.get("diversity_threshold", 0.1)),
         max_candidates=int(pool_cfg.get("max_candidates_per_round", 50)),
+        deduplicate=bool(pool_cfg.get("deduplicate", True)),
     )
     for frame, result in frames:
         for region in extract_regions_for_result(frame, result, config=config):

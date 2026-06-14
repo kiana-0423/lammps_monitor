@@ -22,6 +22,12 @@ class AllegroBackend(MLIPBackend):
         self.config = config or {}
         self.runner = runner or AllegroRunner()
 
+    @classmethod
+    def from_config(cls, config: dict[str, Any]) -> "AllegroBackend":
+        """Build a backend with an ``AllegroRunner`` wired for real inference."""
+
+        return cls(config=config, runner=AllegroRunner.from_config(config))
+
     def _resolve_config(self, config: dict[str, Any] | None = None) -> dict[str, Any]:
         if config is not None:
             return config

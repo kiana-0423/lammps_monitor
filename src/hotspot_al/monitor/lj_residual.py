@@ -1,4 +1,15 @@
-"""Local Lennard-Jones projection residuals for physics-aware OOD screening."""
+"""Local Lennard-Jones projection residuals for physics-aware OOD screening.
+
+For each atom i, the monitor fits a two-parameter Lennard-Jones force model to
+the observed force F_i using only neighbors within a local cutoff:
+
+    F_i ~= sum_j 24 * eps * (2 * sigma^12 / r_ij^14 - sigma^6 / r_ij^8) * r_ij
+
+The reported score is the normalized residual ``||F_fit - F_i|| / ||F_i||``.
+Large residuals mark atoms whose local force cannot be explained by a simple
+pairwise repulsive/attractive projection, which is useful for surfacing
+reactive or many-body environments before expensive committee checks.
+"""
 
 from __future__ import annotations
 

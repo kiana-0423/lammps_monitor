@@ -135,6 +135,13 @@ class CP2KTaskSubmitter:
                 return self._retry_or_return(job)
             job.status = "running"
             return job
+        if job.mode == "slurm" and job.job_id is not None and not job.output_file.exists():
+            slurm_status = self._query_slurm_status(job.job_id)
+            if slurm_status in {"PENDING", "RUNNING"}:
+                job.status = slurm_status.lower()
+                return job
+            if slurm_status is not None:
+                job.metadata["slurm_status"] = slurm_status
         if not job.output_file.exists():
             job.status = "failed"
             job.metadata["error"] = f"CP2K output was not produced: {job.output_file}"
@@ -207,6 +214,19 @@ class CP2KTaskSubmitter:
         result = subprocess.run(["sbatch", str(script_path)], cwd=job.work_dir, check=True, text=True, capture_output=True)
         parts = result.stdout.strip().split()
         return parts[-1] if parts else None
+
+    def _query_slurm_status(self, job_id: str) -> str | None:
+        try:
+            result = subprocess.run(
+                ["squeue", "-h", "-j", job_id, "-o", "%T"],
+                check=False,
+                text=True,
+                capture_output=True,
+            )
+        except FileNotFoundError:
+            return None
+        status = result.stdout.strip().splitlines()
+        return status[0].strip() if status else None
 
     def _retry_or_return(self, job: CP2KSubmittedJob) -> CP2KSubmittedJob:
         if job.mode != "local" or job.attempts > self.max_retries:

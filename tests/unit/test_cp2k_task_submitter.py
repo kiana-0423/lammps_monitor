@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 
 import numpy as np
@@ -92,3 +93,20 @@ def test_cp2k_task_submitter_marks_timed_out_local_job_failed(tmp_path: Path) ->
     assert refreshed.status == "failed"
     assert process.terminated
     assert "walltime" in refreshed.metadata["error"]
+
+
+def test_cp2k_task_submitter_keeps_running_slurm_job_pending(monkeypatch, tmp_path: Path) -> None:
+    submitter = CP2KTaskSubmitter(config=load_config(), work_dir=tmp_path, mode="dry_run")
+    job = submitter.submit(_task())
+    job.mode = "slurm"
+    job.job_id = "12345"
+
+    def fake_run(*args, **kwargs):
+        return subprocess.CompletedProcess(args[0], 0, stdout="RUNNING\n", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    refreshed = submitter.poll_job("evt-cp2k")
+
+    assert refreshed.status == "running"
+    assert "error" not in refreshed.metadata

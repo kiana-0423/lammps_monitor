@@ -29,3 +29,19 @@ def test_config_schema_reports_invalid_ranges() -> None:
 
     with pytest.raises(ConfigError, match="online.monitor_freq"):
         validate_config(config)
+
+
+def test_config_schema_reports_unknown_nested_keys() -> None:
+    config = load_config()
+    config["cp2k"]["typo_cutoff"] = 500
+
+    with pytest.raises(ConfigError, match="Unknown config key.*cp2k.*typo_cutoff"):
+        validate_config(config)
+
+
+def test_config_schema_validates_arbitrary_dict_values() -> None:
+    config = load_config()
+    config["ood_score"]["weights"]["force"] = "high"
+
+    with pytest.raises(ConfigError, match="ood_score.weights.force"):
+        validate_config(config)

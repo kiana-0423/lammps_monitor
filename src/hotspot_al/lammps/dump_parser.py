@@ -3,12 +3,18 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any, Iterator, Protocol
 
 import numpy as np
 from ase import Atoms
 
 from hotspot_al.models import FrameData
+
+
+class SupportsReadText(Protocol):
+    """Minimal interface shared by Path and in-memory dump shims."""
+
+    def read_text(self, encoding: str = "utf-8") -> str: ...
 
 
 def _parse_box_bounds(header: str, lines: list[str]) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -148,7 +154,7 @@ def parse_lammps_dump_frame(
 
 
 def iter_lammps_dump(
-    path: str | Path,
+    path: str | Path | SupportsReadText,
     *,
     type_map: dict[int, str] | None = None,
     timestep_fs: float | None = None,

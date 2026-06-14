@@ -9,6 +9,7 @@ import pytest
 from ase import Atoms
 
 from hotspot_al.lammps.allegro_lammps import AllegroBackend
+from hotspot_al.backends.allegro_inference import AllegroInference
 from hotspot_al.training.allegro_runner import (
     AllegroRunner,
     build_allegro_export_command,
@@ -66,6 +67,30 @@ def test_evaluate_committee_returns_expected_shape() -> None:
     assert committee.shape == (2, 2, 3)
     assert np.allclose(committee[0], 1.0)
     assert np.allclose(committee[1], 2.0)
+
+
+def test_allegro_runner_from_config_wires_inference(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    atoms = Atoms(symbols=["O", "H"], positions=np.zeros((2, 3)))
+    deployed = tmp_path / "deployed.pth"
+    deployed.write_bytes(b"placeholder")
+
+    monkeypatch.setattr(AllegroInference, "_load_model", lambda self, model_path: object())
+    monkeypatch.setattr(
+        AllegroInference,
+        "_call_model",
+        lambda self, model, atoms, config: np.full((len(atoms), 3), 3.0),
+    )
+
+    runner = AllegroRunner.from_config({"allegro": {"deployed_model_paths": [str(deployed)], "device": "cpu"}})
+    forces = runner.evaluate_forces(atoms, config={})
+
+    assert runner.inference is not None
+    assert np.allclose(forces, 3.0)
+
+
+def test_allegro_runner_from_config_requires_model_paths() -> None:
+    with pytest.raises(ValueError, match="deployed_model_paths or allegro.model_paths"):
+        AllegroRunner.from_config({"allegro": {"model_paths": []}})
 
 
 def test_allegro_runner_builds_train_and_export_commands_from_templates() -> None:
@@ -129,6 +154,22 @@ def test_allegro_backend_delegates_force_and_committee_evaluation() -> None:
     assert np.allclose(forces, np.ones((2, 3)))
     assert committee.shape == (2, 2, 3)
     assert np.allclose(committee[1], np.full((2, 3), 2.0))
+
+
+def test_allegro_backend_from_config_uses_inference(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    atoms = Atoms(symbols=["H"], positions=[[0.0, 0.0, 0.0]])
+    deployed = tmp_path / "deployed.pth"
+    deployed.write_bytes(b"placeholder")
+    monkeypatch.setattr(AllegroInference, "_load_model", lambda self, model_path: object())
+    monkeypatch.setattr(
+        AllegroInference,
+        "_call_model",
+        lambda self, model, atoms, config: np.full((len(atoms), 3), 2.0),
+    )
+
+    backend = AllegroBackend.from_config({"allegro": {"deployed_model_paths": [str(deployed)], "device": "cpu"}})
+
+    assert np.allclose(backend.evaluate_forces(atoms), 2.0)
 
 
 def test_allegro_backend_train_dry_run_command(tmp_path: Path) -> None:

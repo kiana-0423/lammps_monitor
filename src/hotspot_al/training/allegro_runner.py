@@ -106,8 +106,40 @@ def run_allegro_export(
 class AllegroRunner:
     """Thin runtime wrapper for injected Allegro integration hooks."""
 
-    def __init__(self, *, force_evaluator: ForceEvaluator | None = None) -> None:
+    def __init__(self, *, force_evaluator: ForceEvaluator | None = None, inference: Any | None = None) -> None:
         self.force_evaluator = force_evaluator
+        self.inference = inference
+
+    @classmethod
+    def from_config(
+        cls,
+        config: dict[str, Any],
+        *,
+        force_evaluator: ForceEvaluator | None = None,
+    ) -> "AllegroRunner":
+        """Create a runner from config, wiring ``AllegroInference`` by default.
+
+        Passing ``force_evaluator`` keeps the existing dependency-injection
+        path. Without it, the runner builds an ``AllegroInference`` adapter
+        from ``allegro.deployed_model_paths`` or ``allegro.model_paths``.
+        """
+
+        if force_evaluator is not None:
+            return cls(force_evaluator=force_evaluator)
+
+        model_paths = _resolve_inference_model_paths(config)
+        if not model_paths:
+            msg = "AllegroRunner.from_config requires allegro.deployed_model_paths or allegro.model_paths."
+            raise ValueError(msg)
+
+        from hotspot_al.backends.allegro_inference import AllegroInference
+
+        inference = AllegroInference(
+            model_paths,
+            device=str(config.get("allegro", {}).get("device", "auto")),
+            type_map=config.get("lammps", {}).get("type_map"),
+        )
+        return cls(force_evaluator=inference.make_evaluator(), inference=inference)
 
     def evaluate_forces(
         self,
@@ -173,3 +205,13 @@ class AllegroRunner:
             msg = "Allegro model export requires allegro.checkpoint_path."
             raise ValueError(msg)
         return run_allegro_export(checkpoint_path, output_dir, config=config, dry_run=dry_run)
+
+
+def _resolve_inference_model_paths(config: dict[str, Any]) -> list[str | Path]:
+    allegro_cfg = config.get("allegro", {})
+    deployed = allegro_cfg.get("deployed_model_paths") or []
+    model_paths = deployed or allegro_cfg.get("model_paths") or []
+    if model_paths:
+        return list(model_paths)
+    checkpoint_path = allegro_cfg.get("checkpoint_path")
+    return [] if checkpoint_path is None else [checkpoint_path]

@@ -48,6 +48,8 @@ allegro:
   lammps_pair_style: allegro
   committee_mode: offline
 
+allegro_model_input: {}
+
 monitor:
   light_interval: 1
   physics_interval: triggered
@@ -68,12 +70,16 @@ online:
   dump_freq: 10
   monitor_freq: 1
   summary_interval: 100
+  progress_file: null
+  continue_on_error: false
+  max_errors: 1
   max_walltime: "24:00:00"
   event_dir: ./lammps_run/events
 
 logging:
   level: INFO
   file: null
+  format: text
 
 ood_score:
   weights:

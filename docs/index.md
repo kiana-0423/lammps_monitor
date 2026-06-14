@@ -30,3 +30,9 @@ default. Replace the injected frame source with `LAMMPSController` and configure
 - `hotspot_al.cp2k`: CP2K input, force parsing, and event task submission.
 - `hotspot_al.training`: dataset writing, retraining triggers, model registry.
 - `hotspot_al.active_learning`: scheduling and candidate bookkeeping.
+
+## References
+
+- [Configuration Reference](config-reference.md)
+- [Online Mode](online-mode.md)
+- [Performance Benchmarks](performance.md)

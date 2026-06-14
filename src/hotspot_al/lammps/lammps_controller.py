@@ -14,6 +14,7 @@ from hotspot_al.lammps.dump_parser import iter_lammps_dump
 from hotspot_al.lammps.lammps_input import write_full_lammps_input
 from hotspot_al.lammps.lammps_runner import build_lammps_command
 from hotspot_al.models import FrameData
+from hotspot_al.exceptions import LAMMPSRuntimeError
 from hotspot_al.utils.logging import configure_logging
 
 
@@ -134,10 +135,26 @@ class LAMMPSController:
                 self._queued_frames.extend(frames[1:])
                 return frames[0]
             if self.process is not None and self.process.poll() is not None:
+                self.assert_healthy()
                 return None
             if deadline is not None and time.monotonic() >= deadline:
                 return None
             time.sleep(self.poll_interval)
+
+    def is_running(self) -> bool:
+        """Return whether the managed LAMMPS process is still alive."""
+
+        return self.process is not None and self.process.poll() is None
+
+    def assert_healthy(self) -> None:
+        """Raise if LAMMPS exited with a non-zero return code."""
+
+        if self.process is None:
+            return
+        returncode = self.process.poll()
+        if returncode not in (None, 0):
+            msg = f"LAMMPS exited with returncode={returncode}; see {self.stderr_file}"
+            raise LAMMPSRuntimeError(msg)
 
     def _read_new_frames(self) -> list[FrameData]:
         if not self.dump_file.exists():

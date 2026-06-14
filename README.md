@@ -99,7 +99,7 @@ sequenceDiagram
 - CP2K force parser；
 - 通用 `extxyz + npz + metadata` 数据输出；
 - Allegro extxyz + per-atom mask 导出；
-- Allegro 薄 runner 骨架：可注入单模型 force evaluator，以及 train/export command template；
+- Allegro runner：可注入单模型 force evaluator，也可通过 `AllegroRunner.from_config(config)` 自动连接 `AllegroInference`，并支持 train/export command template；
 - 在线 `LAMMPSController`、`OnlineMonitor`、`OnlineEventScheduler`；
 - `CP2KTaskSubmitter`：dry-run / local / Slurm 提交模式与完成后训练样本写入；
 - `RetrainTrigger`：按样本数、时间或手动触发 Allegro 训练/导出；
@@ -110,7 +110,7 @@ sequenceDiagram
 
 当前仍保留为接口、骨架或外部适配部分：
 
-- 在线 Allegro 模型推理与 committee evaluator；
+- 真实 Allegro/NequIP 模型文件、部署格式和站点 runtime 环境；
 - LAMMPS / CP2K 真实可执行程序、HPC 队列策略和站点环境配置；
 - point-charge embedding 的具体实现；
 - Allegro 训练代码中的 mask-aware loss 深度集成；
@@ -344,14 +344,15 @@ smoke test 范围。
 
 ## Allegro 接口骨架
 
-当前提供了一个薄封装 [src/hotspot_al/training/allegro_runner.py](src/hotspot_al/training/allegro_runner.py)，目标是把仓库内部协议和外部 Allegro 运行时解耦：
+当前提供了一个封装 [src/hotspot_al/training/allegro_runner.py](src/hotspot_al/training/allegro_runner.py)，目标是把仓库内部协议和外部 Allegro 运行时解耦：
 
 - `AllegroBackend.evaluate_forces(...)`：通过 `AllegroRunner(force_evaluator=...)` 注入真实单模型推理回调；
+- `AllegroRunner.from_config(config)`：读取 `allegro.deployed_model_paths` / `model_paths`，自动创建 `AllegroInference`；
 - `AllegroBackend.evaluate_committee(...)`：对多个 model path 逐个调用 evaluator，返回形状 `(n_models, n_atoms, 3)`；
 - `AllegroBackend.train(...)`：读取 `allegro.dataset_dir`、`allegro.train_output_dir` 和 `allegro.train_command_template`，默认以 dry-run 方式返回外部训练命令；
 - `AllegroBackend.export_model(...)`：读取 `allegro.checkpoint_path` 和 `allegro.export_command_template`，默认以 dry-run 方式返回外部导出命令。
 
-如果没有注入 `force_evaluator`，调用 `AllegroRunner.evaluate_forces(...)` 或依赖它的 committee 评估会抛出 `NotImplementedError`。这是预期的接口边界，不是安装错误。
+如果没有注入 `force_evaluator`，也没有使用 `AllegroRunner.from_config(config)`，调用 `AllegroRunner.evaluate_forces(...)` 或依赖它的 committee 评估会抛出 `NotImplementedError`。这是预期的接口边界，不是安装错误。
 
 命令模板使用 Python `str.format(...)` 占位符：
 
@@ -376,6 +377,15 @@ backend = AllegroBackend(
     config=config,
     runner=AllegroRunner(force_evaluator=my_force_evaluator),
 )
+```
+
+真实 Allegro/NequIP 推理入口：
+
+```python
+from hotspot_al.training import AllegroRunner
+
+runner = AllegroRunner.from_config(config)
+forces = runner.evaluate_forces(atoms, config=config)
 ```
 
 需要用户提供或适配的外部组件：

@@ -17,6 +17,12 @@ class RealAllegroBackend:
     def __init__(self, *, runner: AllegroRunner | None = None) -> None:
         self.runner = runner or AllegroRunner()
 
+    @classmethod
+    def from_config(cls, config: dict[str, Any]) -> "RealAllegroBackend":
+        """Build a backend from config using the real Allegro inference adapter."""
+
+        return cls(runner=AllegroRunner.from_config(config))
+
     def evaluate_forces(
         self,
         atoms: Atoms,
@@ -38,4 +44,3 @@ class RealAllegroBackend:
         """Delegate committee evaluation to the existing AllegroRunner API."""
 
         return self.runner.evaluate_committee(atoms, config=config or {}, model_paths=model_paths)
-
