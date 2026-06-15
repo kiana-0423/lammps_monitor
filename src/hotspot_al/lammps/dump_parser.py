@@ -8,6 +8,7 @@ from typing import Any, Iterator, Protocol
 import numpy as np
 from ase import Atoms
 
+from hotspot_al.exceptions import DataError
 from hotspot_al.models import FrameData
 
 
@@ -18,6 +19,9 @@ class SupportsReadText(Protocol):
 
 
 def _parse_box_bounds(header: str, lines: list[str]) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    if len(lines) < 3:
+        msg = "Malformed LAMMPS dump: truncated BOX BOUNDS section."
+        raise DataError(msg)
     tokens = header.split()[3:]
     boundary_tokens = [token for token in tokens if token in {"pp", "ff", "fs", "sf", "ss", "fm", "mf"}]
     pbc = np.array([token.startswith("p") for token in boundary_tokens[:3]], dtype=bool)
@@ -71,7 +75,7 @@ def _get_positions(fields: list[str], table: dict[str, np.ndarray]) -> np.ndarra
     if {"xs", "ys", "zs"}.issubset(fields):
         return np.column_stack([table["xs"], table["ys"], table["zs"]])
     msg = "LAMMPS dump must contain x/y/z, xu/yu/zu, or xs/ys/zs coordinates."
-    raise ValueError(msg)
+    raise DataError(msg)
 
 
 def _symbol_list(table: dict[str, np.ndarray], type_map: dict[int, str] | None) -> list[str]:
@@ -79,11 +83,15 @@ def _symbol_list(table: dict[str, np.ndarray], type_map: dict[int, str] | None) 
         return [str(value) for value in table["element"]]
     if "type" not in table:
         msg = "LAMMPS dump must contain either 'element' or 'type'."
-        raise ValueError(msg)
+        raise DataError(msg)
     if type_map is None:
         msg = "A type_map is required when the dump does not contain 'element'."
-        raise ValueError(msg)
-    return [type_map[int(value)] for value in table["type"]]
+        raise DataError(msg)
+    try:
+        return [type_map[int(value)] for value in table["type"]]
+    except KeyError as exc:
+        msg = f"LAMMPS type {exc.args[0]} is missing from type_map."
+        raise DataError(msg) from exc
 
 
 def parse_lammps_dump_frame(
@@ -100,13 +108,21 @@ def parse_lammps_dump_frame(
     """Parse one LAMMPS dump frame into ``FrameData``."""
 
     raw_rows = [line.split() for line in atom_lines]
+    for row in raw_rows:
+        if len(row) < len(fields):
+            msg = "Malformed LAMMPS dump: atom row has fewer columns than ATOMS header."
+            raise DataError(msg)
     table: dict[str, np.ndarray] = {}
     for field_index, field_name in enumerate(fields):
         column = [row[field_index] for row in raw_rows]
-        if field_name == "element":
-            table[field_name] = np.asarray(column, dtype=object)
-        else:
-            table[field_name] = np.asarray(column, dtype=float)
+        try:
+            if field_name == "element":
+                table[field_name] = np.asarray(column, dtype=object)
+            else:
+                table[field_name] = np.asarray(column, dtype=float)
+        except ValueError as exc:
+            msg = f"Malformed LAMMPS dump: non-numeric values in column {field_name!r}."
+            raise DataError(msg) from exc
 
     order = np.argsort(table["id"]) if "id" in table else np.arange(len(atom_lines))
     for name, values in list(table.items()):
@@ -171,19 +187,33 @@ def iter_lammps_dump(
         if not lines[cursor].startswith("ITEM: TIMESTEP"):
             cursor += 1
             continue
-        step = int(lines[cursor + 1].strip())
+        if cursor + 8 >= len(lines):
+            msg = "Malformed LAMMPS dump: truncated frame header."
+            raise DataError(msg)
+        try:
+            step = int(lines[cursor + 1].strip())
+        except ValueError as exc:
+            msg = "Malformed LAMMPS dump: invalid timestep."
+            raise DataError(msg) from exc
         if not lines[cursor + 2].startswith("ITEM: NUMBER OF ATOMS"):
             msg = "Malformed LAMMPS dump: missing NUMBER OF ATOMS section."
-            raise ValueError(msg)
-        n_atoms = int(lines[cursor + 3].strip())
+            raise DataError(msg)
+        try:
+            n_atoms = int(lines[cursor + 3].strip())
+        except ValueError as exc:
+            msg = "Malformed LAMMPS dump: invalid atom count."
+            raise DataError(msg) from exc
         box_header = lines[cursor + 4]
         cell, origin, pbc = _parse_box_bounds(box_header, lines[cursor + 5 : cursor + 8])
         atoms_header = lines[cursor + 8]
         if not atoms_header.startswith("ITEM: ATOMS"):
             msg = "Malformed LAMMPS dump: missing ATOMS section."
-            raise ValueError(msg)
+            raise DataError(msg)
         fields = atoms_header.split()[2:]
         atom_lines = lines[cursor + 9 : cursor + 9 + n_atoms]
+        if len(atom_lines) != n_atoms:
+            msg = "Malformed LAMMPS dump: truncated atom section."
+            raise DataError(msg)
         yield parse_lammps_dump_frame(
             step,
             cell,

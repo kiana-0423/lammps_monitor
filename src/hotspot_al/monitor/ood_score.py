@@ -71,11 +71,13 @@ class OODScorer:
 
     def _z_score(self, name: str, values: np.ndarray) -> np.ndarray:
         section = self.config.get("ood_score", {}).get("running_stats", {})
+        if not bool(section.get("enabled", True)):
+            return np.abs(np.asarray(values, dtype=float))
         warmup_frames = int(section.get("warmup_frames", 5))
         min_std = float(section.get("min_std", 1.0e-8))
         stats = self.stats[name]
         if stats.count < warmup_frames:
-            return np.zeros_like(values, dtype=float)
+            return np.abs(np.asarray(values, dtype=float))
         std = max(stats.std, min_std)
         return np.abs((np.asarray(values, dtype=float) - stats.mean) / std)
 

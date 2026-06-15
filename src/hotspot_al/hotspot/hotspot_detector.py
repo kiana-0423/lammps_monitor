@@ -25,8 +25,6 @@ def detect_hotspots(
 
     scores = np.asarray(atom_scores, dtype=float)
     flagged = np.where(scores >= threshold)[0].tolist()
-    if not flagged and len(scores):
-        flagged = [int(np.argmax(scores))]
     positions = atoms.get_positions()
     clusters = cluster_anomalous_atoms(
         flagged,

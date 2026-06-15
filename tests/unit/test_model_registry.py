@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from threading import Thread
 
 import pytest
 
@@ -48,3 +49,29 @@ def test_model_registry_default_smoke_test_rejects_empty_model(tmp_path: Path) -
 
     with pytest.raises(ValueError, match="empty"):
         registry.deploy(version=registered.version)
+
+
+def test_model_registry_concurrent_writes(tmp_path: Path) -> None:
+    registry = ModelRegistry(tmp_path / "registry")
+    model = tmp_path / "model.pth"
+    model.write_text("model", encoding="utf-8")
+    errors: list[BaseException] = []
+
+    def register(version: str) -> None:
+        try:
+            registry.register_model(model, version=version, copy=False)
+        except BaseException as exc:
+            errors.append(exc)
+
+    threads = [
+        Thread(target=register, args=(f"allegro_v{index:03d}",))
+        for index in range(1, 6)
+    ]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    assert errors == []
+    versions = {model.version for model in registry.list_models()}
+    assert versions == {f"allegro_v{index:03d}" for index in range(1, 6)}

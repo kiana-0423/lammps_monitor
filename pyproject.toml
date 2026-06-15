@@ -22,6 +22,7 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
   "pytest>=8.0",
+  "pytest-timeout>=2.3",
   "ruff>=0.6",
   "mypy>=1.10",
   "types-PyYAML>=6.0",
@@ -53,6 +54,7 @@ where = ["src"]
 testpaths = ["tests"]
 pythonpath = ["src"]
 addopts = "-ra"
+timeout = 600
 markers = [
   "integration: tests requiring external programs",
   "allegro: tests requiring real Allegro runtime",

@@ -5,12 +5,14 @@ from __future__ import annotations
 from pathlib import Path
 
 import numpy as np
+import pytest
 from ase import Atoms
 from ase.units import Bohr, Hartree
 
 from hotspot_al.config import load_config
 from hotspot_al.cp2k.cp2k_input import write_cp2k_inputs
 from hotspot_al.cp2k.cp2k_force_parser import parse_cp2k_forces
+from hotspot_al.exceptions import DataError
 from hotspot_al.models import ExtractedRegion
 
 
@@ -56,3 +58,11 @@ def test_cp2k_input_generator_writes_required_sections(tmp_path: Path) -> None:
     assert "BASIS_SET DZVP-MOLOPT-SR-GTH" in text
     assert "POTENTIAL GTH-PBE" in text
     assert "&XC_FUNCTIONAL PBE" in text
+
+
+def test_parse_empty_force_section_raises(tmp_path: Path) -> None:
+    path = tmp_path / "cp2k.out"
+    path.write_text("CP2K output without an ATOMIC FORCES section\n", encoding="utf-8")
+
+    with pytest.raises(DataError, match="No CP2K force block"):
+        parse_cp2k_forces(path)

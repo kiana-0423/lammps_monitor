@@ -66,9 +66,10 @@ def test_cp2k_energy_force_output_is_parseable(fixtures_dir: Path, tmp_path: Pat
         text=True,
         capture_output=True,
         cwd=tmp_path,
-        timeout=120,
+        timeout=600,
     )
 
-    assert result.returncode == 0, result.stdout + result.stderr
+    cp2k_log = output_path.read_text(encoding="utf-8", errors="replace") if output_path.exists() else ""
+    assert result.returncode == 0, result.stdout + result.stderr + cp2k_log
     forces = parse_cp2k_forces(output_path)
     assert forces.shape == (len(atoms), 3)

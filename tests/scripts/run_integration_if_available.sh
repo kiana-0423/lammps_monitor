@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if [[ "${RUN_EXTERNAL:-}" != "1" ]]; then
+if [[ "${RUN_EXTERNAL:-}" != "1" && "${HOTSPOT_AL_CI:-}" != "1" ]]; then
   echo "RUN_EXTERNAL is not 1; skipping integration tests."
   exit 0
 fi
@@ -23,4 +23,3 @@ if [[ -n "${ALLEGRO_MODEL:-}" ]]; then
 else
   echo "ALLEGRO_MODEL is not set; skipping Allegro integration tests."
 fi
-

@@ -8,6 +8,8 @@ from pathlib import Path
 import numpy as np
 from ase.units import Bohr, Hartree
 
+from hotspot_al.exceptions import DataError
+
 
 _CP2K_FORCE_HEADER = re.compile(r"ATOMIC FORCES in \[a\.u\.\]", re.IGNORECASE)
 _CP2K_FORCE_LINE = re.compile(
@@ -38,5 +40,5 @@ def parse_cp2k_forces(path: str | Path) -> np.ndarray:
                 forces.append([float(match.group(1)), float(match.group(2)), float(match.group(3))])
     if not forces:
         msg = f"No CP2K force block found in {path}"
-        raise ValueError(msg)
+        raise DataError(msg)
     return np.asarray(forces, dtype=float) * (Hartree / Bohr)

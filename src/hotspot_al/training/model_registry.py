@@ -3,13 +3,21 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
+import time
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Iterator
 
 from hotspot_al.utils.logging import configure_logging
+
+if os.name == "nt":
+    import msvcrt
+else:
+    import fcntl
 
 
 SmokeTest = Callable[[Path], None]
@@ -34,6 +42,7 @@ class ModelRegistry:
         self.root_dir = Path(root_dir)
         self.root_dir.mkdir(parents=True, exist_ok=True)
         self.index_path = self.root_dir / "registry.json"
+        self.lock_path = self.root_dir / "registry.json.lock"
         self.logger = configure_logging(name=__name__)
 
     def register_model(
@@ -49,28 +58,29 @@ class ModelRegistry:
         """Register a model artifact and persist metadata."""
 
         source = Path(model_path)
-        version = version or self.next_version()
-        target = self.root_dir / f"{version}{source.suffix or '.pth'}"
-        if copy:
-            if not source.is_file():
-                msg = f"Cannot register missing model artifact: {source}"
-                raise FileNotFoundError(msg)
-            shutil.copy2(source, target)
-        else:
-            target = source
-        model = ModelVersion(
-            version=version,
-            path=target,
-            created_at=datetime.now(timezone.utc).isoformat(),
-            training_set_size=training_set_size,
-            validation_metrics=dict(validation_metrics or {}),
-            metadata=dict(metadata or {}),
-        )
-        index = self._load_index()
-        index["models"] = [item for item in index["models"] if item["version"] != version]
-        index["models"].append(self._to_json(model))
-        self._write_index(index)
-        return model
+        with self._locked_index(exclusive=True):
+            index = self._read_index_unlocked()
+            resolved_version = version or self._next_version_from_index(index)
+            target = self.root_dir / f"{resolved_version}{source.suffix or '.pth'}"
+            if copy:
+                if not source.is_file():
+                    msg = f"Cannot register missing model artifact: {source}"
+                    raise FileNotFoundError(msg)
+                shutil.copy2(source, target)
+            else:
+                target = source
+            model = ModelVersion(
+                version=resolved_version,
+                path=target,
+                created_at=datetime.now(timezone.utc).isoformat(),
+                training_set_size=training_set_size,
+                validation_metrics=dict(validation_metrics or {}),
+                metadata=dict(metadata or {}),
+            )
+            index["models"] = [item for item in index["models"] if item["version"] != resolved_version]
+            index["models"].append(self._to_json(model))
+            self._write_index_unlocked(index)
+            return model
 
     def deploy(
         self,
@@ -84,9 +94,10 @@ class ModelRegistry:
 
         model = self.get(version) if version is not None else self.latest()
         (smoke_test or default_smoke_test)(model.path)
-        index = self._load_index()
-        index["deployed_version"] = model.version
-        self._write_index(index)
+        with self._locked_index(exclusive=True):
+            index = self._read_index_unlocked()
+            index["deployed_version"] = model.version
+            self._write_index_unlocked(index)
         if config is not None:
             config.setdefault("allegro", {})["deployed_model_paths"] = [str(model.path)]
         if inference is not None and hasattr(inference, "reload"):
@@ -133,10 +144,11 @@ class ModelRegistry:
         """Return the next ``allegro_vNNN`` version string."""
 
         numbers = []
-        for model in self.list_models():
-            if model.version.startswith("allegro_v"):
+        for item in self._load_index()["models"]:
+            version = item["version"]
+            if version.startswith("allegro_v"):
                 try:
-                    numbers.append(int(model.version.removeprefix("allegro_v")))
+                    numbers.append(int(version.removeprefix("allegro_v")))
                 except ValueError:
                     continue
         return f"allegro_v{(max(numbers) + 1) if numbers else 1:03d}"
@@ -147,12 +159,60 @@ class ModelRegistry:
         return self._load_index().get("deployed_version")
 
     def _load_index(self) -> dict[str, Any]:
+        with self._locked_index(exclusive=False):
+            return self._read_index_unlocked()
+
+    def _write_index(self, index: dict[str, Any]) -> None:
+        with self._locked_index(exclusive=True):
+            self._write_index_unlocked(index)
+
+    def _read_index_unlocked(self) -> dict[str, Any]:
         if not self.index_path.exists():
             return {"models": [], "deployed_version": None}
         return json.loads(self.index_path.read_text(encoding="utf-8"))
 
-    def _write_index(self, index: dict[str, Any]) -> None:
+    def _write_index_unlocked(self, index: dict[str, Any]) -> None:
         self.index_path.write_text(json.dumps(index, indent=2), encoding="utf-8")
+
+    def _next_version_from_index(self, index: dict[str, Any]) -> str:
+        numbers = []
+        for item in index["models"]:
+            version = item["version"]
+            if version.startswith("allegro_v"):
+                try:
+                    numbers.append(int(version.removeprefix("allegro_v")))
+                except ValueError:
+                    continue
+        return f"allegro_v{(max(numbers) + 1) if numbers else 1:03d}"
+
+    @contextmanager
+    def _locked_index(self, *, exclusive: bool, timeout: float = 5.0) -> Iterator[None]:
+        self.lock_path.touch(exist_ok=True)
+        with self.lock_path.open("r+", encoding="utf-8") as lock_file:
+            deadline = time.monotonic() + timeout
+            while True:
+                try:
+                    if "fcntl" in globals():
+                        mode = fcntl.LOCK_EX if exclusive else fcntl.LOCK_SH
+                        fcntl.flock(lock_file.fileno(), mode | fcntl.LOCK_NB)
+                    else:
+                        lock_file.seek(0)
+                        mode = msvcrt.LK_NBLCK if exclusive else msvcrt.LK_NBRLCK
+                        msvcrt.locking(lock_file.fileno(), mode, 1)
+                    break
+                except (BlockingIOError, OSError) as exc:
+                    if time.monotonic() >= deadline:
+                        msg = "Timed out waiting for model registry lock."
+                        raise RuntimeError(msg) from exc
+                    time.sleep(0.05)
+            try:
+                yield
+            finally:
+                if "fcntl" in globals():
+                    fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+                else:
+                    lock_file.seek(0)
+                    msvcrt.locking(lock_file.fileno(), msvcrt.LK_UNLCK, 1)
 
     def _to_json(self, model: ModelVersion) -> dict[str, Any]:
         return {

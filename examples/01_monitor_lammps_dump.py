@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 from pathlib import Path
 
 from hotspot_al.config import load_config
@@ -13,7 +14,13 @@ from hotspot_al.monitor.neighbor_utils import MonitorNeighbors
 from hotspot_al.monitor.ood_score import OODScorer
 
 
-def main() -> None:
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Monitor a LAMMPS dump with light atom-wise OOD metrics.")
+    parser.add_argument("dump", nargs="?", type=Path, default=Path("dump.lammpstrj"), help="LAMMPS dump file")
+    args = parser.parse_args()
+    if not args.dump.is_file():
+        parser.error(f"LAMMPS dump file does not exist: {args.dump}")
+
     config = load_config()
     scorer = OODScorer(config)
     previous_positions = None
@@ -21,7 +28,7 @@ def main() -> None:
     previous_q = None
     neighbors = None
     for frame in iter_dump(
-        Path("dump.lammpstrj"),
+        args.dump,
         type_map=config["lammps"]["type_map"],
         timestep_fs=config["lammps"]["timestep_fs"],
     ):
@@ -54,7 +61,8 @@ def main() -> None:
         previous_positions = frame.atoms.get_positions().copy()
         previous_forces = frame.forces.copy()
         previous_q = q_values.copy()
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())
