@@ -15,6 +15,10 @@ _CP2K_FORCE_HEADER = re.compile(r"ATOMIC FORCES in \[a\.u\.\]", re.IGNORECASE)
 _CP2K_FORCE_LINE = re.compile(
     r"^\s*\d+\s+\d+\s+[A-Za-z]{1,3}\s+([\-0-9Ee+.]+)\s+([\-0-9Ee+.]+)\s+([\-0-9Ee+.]+)\s*$"
 )
+_CP2K_FORCE_EVAL_HEADER = re.compile(r"FORCES\|\s+Atomic forces \[hartree/bohr\]", re.IGNORECASE)
+_CP2K_FORCE_EVAL_LINE = re.compile(
+    r"^\s*FORCES\|\s+\d+\s+([\-0-9Ee+.]+)\s+([\-0-9Ee+.]+)\s+([\-0-9Ee+.]+)\s+[\-0-9Ee+.]+\s*$"
+)
 
 
 def parse_cp2k_forces(path: str | Path) -> np.ndarray:
@@ -28,12 +32,26 @@ def parse_cp2k_forces(path: str | Path) -> np.ndarray:
             capture = False
             forces = []
             continue
+        if _CP2K_FORCE_EVAL_HEADER.search(line):
+            capture = True
+            forces = []
+            continue
         if "Atom   Kind   Element" in line:
             capture = True
             continue
         if capture:
-            if not line.strip() or line.lstrip().startswith("SUM"):
+            if not line.strip() or line.lstrip().startswith("SUM") or line.startswith("FORCES| Sum"):
                 capture = False
+                continue
+            force_eval_match = _CP2K_FORCE_EVAL_LINE.match(line)
+            if force_eval_match:
+                forces.append(
+                    [
+                        float(force_eval_match.group(1)),
+                        float(force_eval_match.group(2)),
+                        float(force_eval_match.group(3)),
+                    ]
+                )
                 continue
             match = _CP2K_FORCE_LINE.match(line)
             if match:

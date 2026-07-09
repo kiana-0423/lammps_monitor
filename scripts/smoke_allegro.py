@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Lightweight Allegro/NequIP runtime smoke test for macOS conda envs."""
+"""Lightweight Allegro/NequIP runtime smoke test."""
 
 from __future__ import annotations
 
@@ -17,6 +17,8 @@ EXIT_RUNTIME_ERROR = 1
 EXIT_IMPORT_ERROR = 2
 EXIT_DEVICE_UNAVAILABLE = 3
 EXIT_ENV_ERROR = 4
+
+SUPPORTED_DEVICES = {"auto", "cpu", "cuda", "mps"}
 
 
 def _version(distribution: str, module: Any | None = None) -> str:
@@ -59,14 +61,41 @@ def _print_cli_version(command: str) -> None:
         print(f"{command} --version: exited {result.returncode} with no output")
 
 
+def _select_device(
+    requested_device: str,
+    *,
+    cuda_available: bool,
+    mps_available: bool,
+) -> tuple[str, int | None]:
+    if requested_device not in SUPPORTED_DEVICES:
+        print(f"error: unsupported ALLEGRO_SMOKE_DEVICE={requested_device!r}")
+        return "", EXIT_DEVICE_UNAVAILABLE
+    if requested_device == "cuda" and not cuda_available:
+        print("selected device: cuda")
+        print("error: ALLEGRO_SMOKE_DEVICE=cuda was requested, but CUDA is unavailable")
+        return "", EXIT_DEVICE_UNAVAILABLE
+    if requested_device == "mps" and not mps_available:
+        print("selected device: mps")
+        print("error: ALLEGRO_SMOKE_DEVICE=mps was requested, but MPS is unavailable")
+        return "", EXIT_DEVICE_UNAVAILABLE
+    if requested_device == "auto":
+        if cuda_available:
+            return "cuda", None
+        if mps_available:
+            return "mps", None
+        return "cpu", None
+    return requested_device, None
+
+
 def main() -> int:
     try:
         print(f"Python version: {sys.version.split()[0]}")
         print(f"Python executable: {sys.executable}")
         conda_env = os.environ.get("CONDA_DEFAULT_ENV", "<unset>")
         print(f"Conda environment: {conda_env}")
-        if conda_env != "allegro-mac":
-            print("error: this smoke test must run inside conda environment allegro-mac")
+        required_env = os.environ.get("ALLEGRO_REQUIRED_CONDA_ENV")
+        if required_env and conda_env != required_env:
+            print(f"error: this smoke test must run inside conda environment {required_env}")
             return EXIT_ENV_ERROR
 
         torch, torch_error = _import_required("torch")
@@ -83,19 +112,13 @@ def main() -> int:
         print(f"mps availability: {mps_available}")
 
         requested_device = os.environ.get("ALLEGRO_SMOKE_DEVICE", "auto").lower()
-        if requested_device == "cuda":
-            print("selected device: cuda")
-            print("error: 当前是 Mac Allegro smoke test，不支持 CUDA。")
-            return EXIT_DEVICE_UNAVAILABLE
-        if requested_device not in {"auto", "cpu", "mps"}:
-            print(f"error: unsupported ALLEGRO_SMOKE_DEVICE={requested_device!r}")
-            return EXIT_DEVICE_UNAVAILABLE
-        if requested_device == "mps" and not mps_available:
-            print("selected device: mps")
-            print("error: ALLEGRO_SMOKE_DEVICE=mps was requested, but MPS is unavailable")
-            return EXIT_DEVICE_UNAVAILABLE
-
-        selected_device = "mps" if requested_device == "mps" else "cpu"
+        selected_device, device_error = _select_device(
+            requested_device,
+            cuda_available=cuda_available,
+            mps_available=mps_available,
+        )
+        if device_error is not None:
+            return device_error
         print(f"selected device: {selected_device}")
 
         nequip, nequip_error = _import_required("nequip")
@@ -120,12 +143,10 @@ def main() -> int:
         cpu_result = (cpu_tensor * 2.0).sum().item()
         print(f"cpu tensor sanity: ok ({cpu_result:.1f})")
 
-        if mps_available:
-            mps_tensor = torch.tensor([1.0, 2.0, 3.0], device="mps")
-            mps_result = (mps_tensor + 1.0).sum().item()
-            print(f"mps tensor sanity: ok ({mps_result:.1f})")
-        else:
-            print("mps tensor sanity: skipped (MPS unavailable)")
+        if selected_device != "cpu":
+            device_tensor = torch.tensor([1.0, 2.0, 3.0], device=selected_device)
+            device_result = (device_tensor + 1.0).sum().item()
+            print(f"{selected_device} tensor sanity: ok ({device_result:.1f})")
 
         _print_cli_version("nequip-train")
         _print_cli_version("allegro-train")

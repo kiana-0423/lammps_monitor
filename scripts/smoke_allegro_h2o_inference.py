@@ -20,6 +20,7 @@ EXIT_INFERENCE_FAILED = 6
 EXIT_ELEMENT_MISMATCH = 7
 
 REQUIRED_SYMBOLS = {"H", "O"}
+SUPPORTED_DEVICES = {"auto", "cpu", "cuda", "mps"}
 
 
 def _import_required(module_name: str) -> tuple[Any | None, str | None]:
@@ -31,23 +32,30 @@ def _import_required(module_name: str) -> tuple[Any | None, str | None]:
 
 def _select_device(torch: Any) -> tuple[str | None, int | None]:
     requested = os.environ.get("ALLEGRO_SMOKE_DEVICE", "cpu").lower()
+    cuda_available = bool(torch.cuda.is_available())
     mps_available = bool(
         hasattr(torch.backends, "mps") and torch.backends.mps.is_available()
     )
     print(f"requested device: {requested}")
-    print(f"cuda availability: {bool(torch.cuda.is_available())}")
+    print(f"cuda availability: {cuda_available}")
     print(f"mps availability: {mps_available}")
 
-    if requested == "cuda":
-        print("error: 当前是 Mac Allegro smoke test，不支持 CUDA。")
-        return None, EXIT_DEVICE_UNAVAILABLE
-    if requested not in {"auto", "cpu", "mps"}:
+    if requested not in SUPPORTED_DEVICES:
         print(f"error: unsupported ALLEGRO_SMOKE_DEVICE={requested!r}")
+        return None, EXIT_DEVICE_UNAVAILABLE
+    if requested == "cuda" and not cuda_available:
+        print("error: ALLEGRO_SMOKE_DEVICE=cuda was requested, but CUDA is unavailable")
         return None, EXIT_DEVICE_UNAVAILABLE
     if requested == "mps" and not mps_available:
         print("error: ALLEGRO_SMOKE_DEVICE=mps was requested, but MPS is unavailable")
         return None, EXIT_DEVICE_UNAVAILABLE
-    return ("mps" if requested == "mps" else "cpu"), None
+    if requested == "auto":
+        if cuda_available:
+            return "cuda", None
+        if mps_available:
+            return "mps", None
+        return "cpu", None
+    return requested, None
 
 
 def _build_h2o(ase_module: Any) -> Any:

@@ -46,6 +46,26 @@ def test_cp2k_force_parser_reads_toy_output(fixtures_dir: Path) -> None:
     assert np.allclose(forces, expected)
 
 
+def test_cp2k_force_parser_reads_force_eval_print(tmp_path: Path) -> None:
+    path = tmp_path / "cp2k.out"
+    path.write_text(
+        "\n".join(
+            [
+                "FORCES| Atomic forces [hartree/bohr]",
+                "FORCES|   Atom     x               y               z               |f|",
+                "FORCES|      1 -1.00000000E-01  2.00000000E-01 -3.00000000E-01   3.74165739E-01",
+                "FORCES|      2  4.00000000E-01 -5.00000000E-01  6.00000000E-01   8.77496439E-01",
+                "FORCES| Sum     3.00000000E-01 -3.00000000E-01  3.00000000E-01",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    conversion = Hartree / Bohr
+    expected = np.array([[-0.1, 0.2, -0.3], [0.4, -0.5, 0.6]]) * conversion
+    assert np.allclose(parse_cp2k_forces(path), expected)
+
+
 def test_cp2k_input_generator_writes_required_sections(tmp_path: Path) -> None:
     written = write_cp2k_inputs(_toy_region(), tmp_path, config=load_config(), job_name="toy")
 
@@ -58,6 +78,8 @@ def test_cp2k_input_generator_writes_required_sections(tmp_path: Path) -> None:
     assert "BASIS_SET DZVP-MOLOPT-SR-GTH" in text
     assert "POTENTIAL GTH-PBE" in text
     assert "&XC_FUNCTIONAL PBE" in text
+    assert "  &PRINT\n    &FORCES MEDIUM" in text
+    assert "    &PRINT\n      &FORCES" not in text
 
 
 def test_parse_empty_force_section_raises(tmp_path: Path) -> None:
