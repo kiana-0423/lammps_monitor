@@ -170,6 +170,45 @@ project/
 
 ## 安装
 
+如果已经在目标 conda 环境中配置好 Python、PyTorch/CUDA、Allegro/NequIP、
+LAMMPS + Allegro `pair_allegro` 和 CP2K，可以用 runtime doctor 检查当前
+环境是否完整：
+
+```bash
+python scripts/check_runtime.py doctor --write-config
+```
+
+如果 `lmp_allegro` 或 `cp2k.popt` 不在 `PATH` 中，可以显式传入：
+
+```bash
+LAMMPS_BIN=/path/to/lmp_allegro CP2K_BIN=/path/to/cp2k.popt python scripts/check_runtime.py doctor --write-config
+```
+
+runtime doctor 会检查：
+
+- `lmp_allegro` / `lmp` / `lammps`，也可用 `LAMMPS_BIN=/path/to/lmp_allegro` 指定；
+- `cp2k.popt` / `cp2k.psmp` / `cp2k`，也可用 `CP2K_BIN=/path/to/cp2k.popt` 指定；
+- `torch`、`nequip`、`allegro`、`ase` 是否可导入；
+- PyTorch CUDA 是否可用。
+
+加上 `--write-config` 后会生成 `config/runtime.local.yaml`，其中写入探测到的
+LAMMPS 和 CP2K 可执行文件路径。正式运行时可把它作为覆盖配置传给
+`load_config("config/runtime.local.yaml")`，或者在自己的配置文件里手动复制：
+
+```yaml
+lammps:
+  executable: /path/to/lmp_allegro
+
+cp2k:
+  executable: /path/to/cp2k.popt
+```
+
+如果希望缺少任一运行时组件时直接失败，可以使用：
+
+```bash
+python scripts/check_runtime.py doctor --strict
+```
+
 推荐用 editable install，确保普通 Python 进程无需设置 `PYTHONPATH` 就能导入包：
 
 ```bash

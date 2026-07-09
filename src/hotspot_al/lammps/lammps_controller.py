@@ -29,6 +29,7 @@ class LAMMPSController:
         config: dict[str, Any],
         work_dir: str | Path | None = None,
         poll_interval: float = 0.1,
+        stdout_file: str | Path | None = None,
         stderr_file: str | Path | None = None,
     ) -> None:
         self.input_file = Path(input_file)
@@ -37,6 +38,7 @@ class LAMMPSController:
         dump_path = Path(dump_file)
         self.dump_file = dump_path if dump_path.is_absolute() else self.work_dir / dump_path
         self.poll_interval = float(poll_interval)
+        self.stdout_file = Path(stdout_file) if stdout_file is not None else self.work_dir / "lammps.stdout.log"
         self.stderr_file = Path(stderr_file) if stderr_file is not None else self.work_dir / "lammps.stderr.log"
         self.process: subprocess.Popen[str] | None = None
         self.logger = configure_logging(config, name=__name__)
@@ -90,12 +92,13 @@ class LAMMPSController:
         self.work_dir.mkdir(parents=True, exist_ok=True)
         command = build_lammps_command(self.input_file, config=self.config)
         self.logger.info("starting LAMMPS command=%s work_dir=%s", command, self.work_dir)
+        stdout_handle = self.stdout_file.open("a", encoding="utf-8")
         stderr_handle = self.stderr_file.open("a", encoding="utf-8")
         self.process = subprocess.Popen(
             command,
             cwd=self.work_dir,
             stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
+            stdout=stdout_handle,
             stderr=stderr_handle,
             text=True,
         )
