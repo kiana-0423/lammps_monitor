@@ -14,9 +14,11 @@ def generate_atom_mask(region: ExtractedRegion, config: dict) -> np.ndarray:
     mask_cfg = config.get("training_mask", config)
     mask = np.zeros(len(region.atoms), dtype=float)
     mask[region.outer_buffer_indices] = float(mask_cfg.get("outer_buffer", 0.0))
-    mask[region.boundary_indices] = float(mask_cfg.get("boundary", 0.0))
+    boundary_key = "frozen_boundary" if region.metadata.get("extraction_mode") == "block" else "boundary"
+    mask[region.boundary_indices] = float(mask_cfg.get(boundary_key, mask_cfg.get("boundary", 0.0)))
     mask[region.inner_buffer_indices] = float(mask_cfg.get("inner_buffer", 0.3))
-    mask[region.core_indices] = float(mask_cfg.get("core", 1.0))
+    core_key = "label_core" if region.metadata.get("extraction_mode") == "block" else "core"
+    mask[region.core_indices] = float(mask_cfg.get(core_key, mask_cfg.get("core", 1.0)))
     mask[region.h_cap_indices] = float(mask_cfg.get("h_cap", 0.0))
     region.mask_weights = mask.copy()
     if not region.region_labels:
@@ -27,6 +29,8 @@ def generate_atom_mask(region: ExtractedRegion, config: dict) -> np.ndarray:
 def generate_region_labels(region: ExtractedRegion) -> list[str]:
     """Return a human-readable per-atom region label list."""
 
+    if region.metadata.get("extraction_mode") == "block" and "atom_role" in region.metadata:
+        return list(region.metadata["atom_role"])
     regions = {
         "core": region.core_indices,
         "inner_buffer": region.inner_buffer_indices,

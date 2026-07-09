@@ -6,14 +6,13 @@ import os
 import subprocess
 from pathlib import Path
 
-from ase.io import read
 import pytest
+from ase.io import read
 
 from hotspot_al.config import load_config
 from hotspot_al.cp2k.cp2k_force_parser import parse_cp2k_forces
 from hotspot_al.cp2k.cp2k_input import write_cp2k_inputs
 from hotspot_al.models import ExtractedRegion
-
 
 pytestmark = [pytest.mark.integration, pytest.mark.cp2k]
 

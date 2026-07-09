@@ -64,7 +64,7 @@ class RetrainTrigger:
         state = self._load_state()
         previous_count = int(state.get("sample_count", 0))
         new_count = max(0, len(samples) - previous_count)
-        reason = self._trigger_reason(force=force, new_count=new_count, state=state)
+        reason = self._evaluate_trigger_condition(force=force, new_count=new_count, state=state)
         if reason is None:
             self.logger.info("retraining not due: samples=%d new_samples=%d", len(samples), new_count)
             return RetrainResult(False, "not_due", len(samples), metadata={"new_samples": new_count})
@@ -74,12 +74,9 @@ class RetrainTrigger:
 
         self.logger.info("retraining triggered reason=%s samples=%d new_samples=%d", reason, len(samples), new_count)
         dataset_path = self.merge_samples(samples)
-        self.config.setdefault("allegro", {})["dataset_dir"] = str(self.dataset_dir)
-        self.config["allegro"].setdefault("train_output_dir", str(self.dataset_dir / "runs"))
-        train_result = self.runner.train(config=self.config, dry_run=self.dry_run)
-        export_result = self.runner.export_model(self.export_dir, config=self.config, dry_run=self.dry_run)
+        train_result, export_result = self._execute_training()
         model_version = self._register_exported_model(sample_count=len(samples))
-        self._write_state({"sample_count": len(samples), "last_run_at": _now(), "last_reason": reason})
+        self._update_state(sample_count=len(samples), reason=reason)
         self.logger.info("retraining finished reason=%s dataset=%s", reason, dataset_path)
         return RetrainResult(
             True,
@@ -119,7 +116,9 @@ class RetrainTrigger:
         write(dataset_path, atoms_list, format="extxyz")
         return dataset_path
 
-    def _trigger_reason(self, *, force: bool, new_count: int, state: dict[str, Any]) -> str | None:
+    def _evaluate_trigger_condition(self, *, force: bool, new_count: int, state: dict[str, Any]) -> str | None:
+        """Return a retraining reason when current state is due."""
+
         if force:
             return "manual"
         if new_count >= self.min_new_samples:
@@ -132,6 +131,20 @@ class RetrainTrigger:
             if datetime.now(timezone.utc) - last_run >= timedelta(hours=self.interval_hours):
                 return "time_interval"
         return None
+
+    def _execute_training(self) -> tuple[Any, Any]:
+        """Run Allegro training and export for the merged dataset."""
+
+        self.config.setdefault("allegro", {})["dataset_dir"] = str(self.dataset_dir)
+        self.config["allegro"].setdefault("train_output_dir", str(self.dataset_dir / "runs"))
+        train_result = self.runner.train(config=self.config, dry_run=self.dry_run)
+        export_result = self.runner.export_model(self.export_dir, config=self.config, dry_run=self.dry_run)
+        return train_result, export_result
+
+    def _update_state(self, *, sample_count: int, reason: str) -> None:
+        """Persist retraining bookkeeping."""
+
+        self._write_state({"sample_count": sample_count, "last_run_at": _now(), "last_reason": reason})
 
     def _register_exported_model(self, *, sample_count: int) -> ModelVersion | None:
         if self.registry is None or self.dry_run:

@@ -5,9 +5,9 @@ from __future__ import annotations
 from collections import defaultdict
 
 import numpy as np
+from ase import Atoms
 from ase.data import covalent_radii
-
-from .periodic import mic_displacement
+from ase.neighborlist import neighbor_list
 
 
 def infer_bonds(
@@ -21,16 +21,21 @@ def infer_bonds(
 
     positions = np.asarray(positions, dtype=float)
     numbers = np.asarray(numbers, dtype=int)
-    bonds: list[tuple[int, int]] = []
-    for i in range(len(positions)):
-        radius_i = covalent_radii[numbers[i]]
-        for j in range(i + 1, len(positions)):
-            radius_j = covalent_radii[numbers[j]]
-            cutoff = scale * (radius_i + radius_j)
-            distance = np.linalg.norm(mic_displacement(positions[i], positions[j], cell=cell, pbc=pbc))
-            if distance <= cutoff:
-                bonds.append((i, j))
-    return bonds
+    if len(positions) < 2:
+        return []
+
+    radii = covalent_radii[numbers]
+    max_cutoff = float(scale * 2.0 * np.max(radii))
+    use_pbc = pbc if cell is not None else False
+    atoms = Atoms(numbers=numbers, positions=positions, cell=cell, pbc=use_pbc)
+    left, right, distances = neighbor_list("ijd", atoms, max_cutoff)
+    unique_mask = left < right
+    left = left[unique_mask]
+    right = right[unique_mask]
+    distances = distances[unique_mask]
+    cutoffs = scale * (radii[left] + radii[right])
+    bonded_mask = distances <= cutoffs
+    return list(zip(left[bonded_mask].astype(int).tolist(), right[bonded_mask].astype(int).tolist()))
 
 
 def bonded_neighbors(

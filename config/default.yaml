@@ -126,6 +126,24 @@ extraction:
     z_margin: 8.0
   graph:
     hops: 2
+  block:
+    scheme: spatial_grid
+    size: [12.0, 12.0, 12.0]
+    halo: 5.0
+    merge_adjacent: true
+    max_merged_blocks: 4
+    cooldown_steps: 1000
+    label_region:
+      type: block_core
+      shrink: 0.0
+    buffer:
+      inner: 3.0
+      outer: 5.0
+    frozen:
+      enabled: true
+      thickness: 2.0
+    max_atoms: 600
+    min_atoms: 30
 
 h_capping:
   enabled: true
@@ -183,9 +201,11 @@ model_registry:
 
 training_mask:
   core: 1.0
+  label_core: 1.0
   inner_buffer: 0.3
   outer_buffer: 0.0
   boundary: 0.0
+  frozen_boundary: 0.0
   h_cap: 0.0
   energy_weight: 0.0
   stress_weight: 0.0

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-
 TOY_DUMP = """ITEM: TIMESTEP
 100
 ITEM: NUMBER OF ATOMS

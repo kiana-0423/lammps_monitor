@@ -10,7 +10,6 @@ from hotspot_al.config import load_config
 from hotspot_al.lammps.lammps_controller import LAMMPSController
 from hotspot_al.lammps.lammps_input import build_full_lammps_input, write_full_lammps_input
 
-
 PAIR_BLOCK = "pair_style allegro model.pth\npair_coeff * *"
 
 

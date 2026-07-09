@@ -72,6 +72,23 @@ def test_linear_lj_fit_handles_singular_geometry() -> None:
     assert fit.residual == 1.0
 
 
+def test_linear_lj_fit_rejects_ill_conditioned_geometry() -> None:
+    vectors = np.array(
+        [
+            [1.0, 0.0, 0.0],
+            [1.01, 1.0e-4, 0.0],
+            [1.02, -1.0e-4, 0.0],
+            [1.03, 2.0e-4, 0.0],
+        ],
+        dtype=float,
+    )
+
+    fit = fit_local_lj_force_linear(vectors, np.array([1.0, 0.0, 0.0]))
+
+    assert not fit.valid
+    assert fit.residual == 1.0
+
+
 def test_score_physics_lazy_lj_only_fits_suspicious_atoms() -> None:
     atoms = Atoms(
         "H4",

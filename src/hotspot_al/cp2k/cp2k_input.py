@@ -158,8 +158,12 @@ def write_cp2k_inputs(
     h_opt_cfg = cp2k_cfg.get("h_only_opt", {})
     sp_cfg = cp2k_cfg.get("single_point", {})
 
-    if bool(h_opt_cfg.get("enabled", True)) and region.h_cap_indices:
-        fixed_atoms = [index for index in range(len(region.atoms)) if index not in set(region.h_cap_indices)]
+    if bool(h_opt_cfg.get("enabled", True)) and (region.h_cap_indices or region.boundary_indices):
+        if region.h_cap_indices:
+            fixed_atoms = [index for index in range(len(region.atoms)) if index not in set(region.h_cap_indices)]
+        else:
+            fixed_atoms = []
+        fixed_atoms = sorted({*fixed_atoms, *region.boundary_indices})
         hopt_path = target / f"{job_name}_hopt.inp"
         hopt_path.write_text(
             build_cp2k_input(

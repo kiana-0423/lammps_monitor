@@ -1,4 +1,9 @@
-"""Compatibility wrappers for mask-weighted force losses."""
+"""Compatibility wrappers for mask-weighted force losses.
+
+.. deprecated::
+   Import directly from :mod:`hotspot_al.training.loss_mask` instead.
+   This module will be removed in a future version.
+"""
 
 from __future__ import annotations
 

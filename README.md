@@ -64,7 +64,11 @@ flowchart TD
     B --> C[Atom-wise OOD scores]
     C --> D[Rolling event buffer]
     D --> E[Hotspot extraction]
-    E --> F[CP2KTaskSubmitter]
+    E --> E1{extraction.mode?}
+    E1 -->|cluster/slab/graph| E2[H capping + boundary]
+    E1 -->|block| E3[Block core + halo + frozen boundary + cooldown]
+    E2 --> F[CP2KTaskSubmitter]
+    E3 --> F
     F --> G[Masked extxyz dataset]
     G --> H[RetrainTrigger]
     H --> I[ModelRegistry]
@@ -93,7 +97,8 @@ sequenceDiagram
 - staged OOD scoring：`light` / `physics` / `full`；
 - rolling buffer 与事件元数据；
 - hotspot 检测与空间聚类；
-- cluster / slab / graph 三种局域截取 baseline；
+- cluster / slab / graph / block 四种局域截取 baseline；
+- block 模式：固定空间网格切分、异常 block 合并、cooldown 去重、frozen boundary，适合大规模周期体系；
 - 保守式 H capping；
 - CP2K H-only optimization 与 single-point input 生成；
 - CP2K force parser；
@@ -112,7 +117,7 @@ sequenceDiagram
 
 - 真实 Allegro/NequIP 模型文件、部署格式和站点 runtime 环境；
 - LAMMPS / CP2K 真实可执行程序、HPC 队列策略和站点环境配置；
-- point-charge embedding 的具体实现；
+- point-charge embedding 的动态电荷计算（当前仅支持配置文件静态电荷）；
 - Allegro 训练代码中的 mask-aware loss 深度集成；
 - 生产级候选池排序和多轮主动学习策略。
 
@@ -167,6 +172,14 @@ project/
 - `region_labels`
 - `mask_weights`
 - `metadata`
+
+block 模式下 `ExtractedRegion.metadata` 额外包含：
+
+- `extraction_mode: "block"`
+- `block_ids`
+- `atom_role`: `label_core` / `inner_buffer` / `outer_buffer` / `frozen_boundary`
+- `cooldown_steps`
+- `h_cap_enabled: false`
 
 ## 安装
 
@@ -245,6 +258,24 @@ pip install -r requirements.txt
 
 正式使用本仓库源码时仍建议执行 `pip install -e .`，而不是依赖 `PYTHONPATH=src`。
 
+## 文档与容器
+
+API 文档使用 MkDocs / mkdocstrings：
+
+```bash
+pip install -e ".[docs]"
+mkdocs serve
+```
+
+基础 CPU-only 容器定义不包含 Torch/CUDA、LAMMPS、CP2K 或 Allegro runtime：
+
+```bash
+docker build -t hotspot-al .
+docker run --rm hotspot-al
+```
+
+HPC 环境可参考 [container/apptainer.def](container/apptainer.def) 构建 Apptainer 镜像。
+
 ## 配置
 
 主配置在 [config/default.yaml](config/default.yaml)。
@@ -258,12 +289,12 @@ pip install -r requirements.txt
 - `allegro.train_command_template` / `export_command_template`：外部 Allegro runtime 命令模板；
 - `monitor` / `ood_score`：三阶段触发参数；
 - `buffer` / `hotspot`：事件缓存和聚类半径；
-- `extraction`：cluster/slab/graph 截取参数；
+- `extraction`：cluster/slab/graph/block 截取参数；
 - `h_capping`：保守式补氢策略；
 - `cp2k`：functional、basis、cutoff、SCF、H-only optimization、submit mode、walltime；
 - `retraining` / `model_registry`：自动重训练触发和模型版本目录；
 - `logging`：日志级别和可选文件输出；
-- `training_mask`：core/buffer/boundary/H-cap 权重；
+- `training_mask`：core 或 label_core、buffer、boundary 或 frozen_boundary、H-cap 权重；
 - `candidate_pool`：去重与每轮上限。
 
 ## 最小示例

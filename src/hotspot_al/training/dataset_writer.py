@@ -11,6 +11,7 @@ from ase.io import write
 
 from hotspot_al.models import ExtractedRegion
 from hotspot_al.training.mask_generator import generate_region_labels
+from hotspot_al.training.region_codes import region_codes_for_labels, region_label_map_json
 
 
 def write_dataset_entry(
@@ -29,15 +30,10 @@ def write_dataset_entry(
     atoms = region.atoms.copy()
     atoms.arrays["forces"] = np.asarray(forces, dtype=float)
     atoms.arrays["mask_weights"] = np.asarray(mask, dtype=float)
-    region_codes = np.asarray(
-        [
-            {"core": 0, "inner_buffer": 1, "outer_buffer": 2, "boundary": 3, "h_cap": 4}.get(label, -1)
-            for label in generate_region_labels(region)
-        ],
-        dtype=int,
-    )
+    region_labels = generate_region_labels(region)
+    region_codes = region_codes_for_labels(region_labels)
     atoms.arrays["region_code"] = region_codes
-    atoms.info["region_label_map"] = json.dumps({0: "core", 1: "inner_buffer", 2: "outer_buffer", 3: "boundary", 4: "h_cap"})
+    atoms.info["region_label_map"] = region_label_map_json()
     if region.metadata.get("original_frame_id") is not None:
         atoms.info["original_frame_id"] = region.metadata.get("original_frame_id")
     if region.metadata.get("hotspot_id") is not None:
@@ -60,7 +56,12 @@ def write_dataset_entry(
 
     metadata_path = target / f"{prefix}_metadata.json"
     metadata = {
-        "region_labels": generate_region_labels(region),
+        "region_labels": region_labels,
+        "atom_role": region_labels,
+        "force_weight": np.asarray(mask, dtype=float).tolist(),
+        "energy_weight": float((extra_metadata or {}).get("energy_weight", 0.0)),
+        "core_atom_indices": list(region.core_indices),
+        "masked_atom_indices": np.where(np.asarray(mask, dtype=float) <= 0.0)[0].astype(int).tolist(),
         "metadata": region.metadata,
         "extra_metadata": extra_metadata or {},
     }

@@ -129,9 +129,11 @@ def parse_lammps_dump_frame(
         table[name] = values[order]
 
     positions = _get_positions(fields, table)
-    if {"xs", "ys", "zs"}.issubset(fields):
+    scaled_positions = {"xs", "ys", "zs"}.issubset(fields)
+    if scaled_positions:
         positions = positions @ cell
-    positions = positions - origin
+    else:
+        positions = positions - origin
 
     symbols = _symbol_list(table, type_map)
     atoms = Atoms(symbols=symbols, positions=positions, cell=cell, pbc=pbc)

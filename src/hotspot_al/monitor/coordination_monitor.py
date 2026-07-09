@@ -5,9 +5,12 @@ from __future__ import annotations
 import numpy as np
 from ase import Atoms
 from ase.data import covalent_radii
+from ase.neighborlist import neighbor_list
 
-from hotspot_al.utils.periodic import mic_displacements_from_reference
 from hotspot_al.monitor.neighbor_utils import MonitorNeighbors
+from hotspot_al.utils.periodic import mic_displacements_from_reference
+
+_BATCH_NEIGHBOR_MIN_ATOMS = 256
 
 
 def smooth_coordination_numbers(
@@ -50,13 +53,26 @@ def smooth_coordination_numbers_fast(
     numbers = atoms.get_atomic_numbers()
     q_values = np.zeros(len(atoms), dtype=float)
     sub_cutoff = nl.coordination_cutoff if cutoff is None else float(cutoff)
-    for i in range(len(atoms)):
-        indices, _displacements, distances = nl.get_displacements(atoms, i, sub_cutoff)
-        if len(indices) == 0:
-            continue
-        radii = scale * (covalent_radii[numbers[i]] + covalent_radii[numbers[indices]])
-        weights = 1.0 / (1.0 + np.power(distances / radii, power))
-        q_values[i] = float(np.sum(weights))
+    if len(atoms) < _BATCH_NEIGHBOR_MIN_ATOMS:
+        for index in range(len(atoms)):
+            indices, _displacements, distances = nl.get_displacements(atoms, index, sub_cutoff)
+            if len(indices) == 0:
+                continue
+            radii = scale * (covalent_radii[numbers[index]] + covalent_radii[numbers[indices]])
+            weights = 1.0 / (1.0 + np.power(distances / radii, power))
+            q_values[index] = float(np.sum(weights))
+        return q_values
+
+    left, right, distances = neighbor_list("ijd", atoms, sub_cutoff)
+    if len(left) == 0:
+        return q_values
+    mask = distances > 1.0e-8
+    left = left[mask]
+    right = right[mask]
+    distances = distances[mask]
+    radii = scale * (covalent_radii[numbers[left]] + covalent_radii[numbers[right]])
+    weights = 1.0 / (1.0 + np.power(distances / radii, power))
+    np.add.at(q_values, left, weights)
     return q_values
 
 

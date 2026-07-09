@@ -10,8 +10,8 @@ from ase import Atoms
 from ase.units import Bohr, Hartree
 
 from hotspot_al.config import load_config
-from hotspot_al.cp2k.cp2k_input import write_cp2k_inputs
 from hotspot_al.cp2k.cp2k_force_parser import parse_cp2k_forces
+from hotspot_al.cp2k.cp2k_input import write_cp2k_inputs
 from hotspot_al.exceptions import DataError
 from hotspot_al.models import ExtractedRegion
 

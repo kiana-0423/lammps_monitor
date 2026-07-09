@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import numpy as np
+
 from hotspot_al.cp2k.cp2k_force_parser import parse_cp2k_forces as _parse_cp2k_forces
 
 

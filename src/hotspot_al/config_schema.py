@@ -8,7 +8,6 @@ from typing import Any
 
 from hotspot_al.exceptions import ConfigError
 
-
 Schema = Mapping[str, Any]
 
 
@@ -125,6 +124,28 @@ CONFIG_SCHEMA: Schema = {
         "graph": {
             "hops": int,
         },
+        "block": {
+            "scheme": str,
+            "size": list,
+            "halo": (int, float),
+            "merge_adjacent": bool,
+            "max_merged_blocks": int,
+            "cooldown_steps": int,
+            "label_region": {
+                "type": str,
+                "shrink": (int, float),
+            },
+            "buffer": {
+                "inner": (int, float),
+                "outer": (int, float),
+            },
+            "frozen": {
+                "enabled": bool,
+                "thickness": (int, float),
+            },
+            "max_atoms": int,
+            "min_atoms": int,
+        },
     },
     "h_capping": {
         "enabled": bool,
@@ -177,9 +198,11 @@ CONFIG_SCHEMA: Schema = {
     },
     "training_mask": {
         "core": (int, float),
+        "label_core": (int, float),
         "inner_buffer": (int, float),
         "outer_buffer": (int, float),
         "boundary": (int, float),
+        "frozen_boundary": (int, float),
         "h_cap": (int, float),
         "energy_weight": (int, float),
         "stress_weight": (int, float),
@@ -258,8 +281,6 @@ def _matches_type(value: Any, expected: Any) -> bool:
         return isinstance(value, float) and not isinstance(value, bool)
     if expected in (str, list, dict, type(None)):
         return isinstance(value, expected)
-    if expected == (int, float):
-        return isinstance(value, (int, float)) and not isinstance(value, bool)
     return isinstance(value, expected)
 
 
@@ -275,6 +296,12 @@ def _validate_ranges(config: Mapping[str, Any]) -> None:
         ("extraction", "extract_radius"),
         ("extraction", "max_atoms"),
         ("extraction", "min_atoms"),
+        ("extraction", "block", "halo"),
+        ("extraction", "block", "max_merged_blocks"),
+        ("extraction", "block", "buffer", "inner"),
+        ("extraction", "block", "buffer", "outer"),
+        ("extraction", "block", "max_atoms"),
+        ("extraction", "block", "min_atoms"),
         ("cp2k", "max_scf"),
         ("cp2k", "h_only_opt", "max_iter"),
         ("retraining", "min_new_samples"),

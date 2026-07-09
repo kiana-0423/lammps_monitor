@@ -1,0 +1,22 @@
+site_name: PHAL / hotspot_al
+site_description: Physics-aware hotspot active learning for Allegro-LAMMPS-CP2K workflows.
+
+theme:
+  name: mkdocs
+
+nav:
+  - Home: index.md
+  - Configuration: config-reference.md
+  - Online Mode: online-mode.md
+  - Performance: performance.md
+  - API Reference: api.md
+
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          options:
+            docstring_style: google
+            show_source: true
+            show_root_heading: true

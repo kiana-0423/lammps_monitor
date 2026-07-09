@@ -6,15 +6,15 @@ import signal
 import subprocess
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, TextIO
 
 from ase import Atoms
 
+from hotspot_al.exceptions import LAMMPSRuntimeError
 from hotspot_al.lammps.dump_parser import iter_lammps_dump
 from hotspot_al.lammps.lammps_input import write_full_lammps_input
 from hotspot_al.lammps.lammps_runner import build_lammps_command
 from hotspot_al.models import FrameData
-from hotspot_al.exceptions import LAMMPSRuntimeError
 from hotspot_al.utils.logging import configure_logging
 
 
@@ -44,6 +44,8 @@ class LAMMPSController:
         self.logger = configure_logging(config, name=__name__)
         self._offset = 0
         self._queued_frames: list[FrameData] = []
+        self._stdout_handle: TextIO | None = None
+        self._stderr_handle: TextIO | None = None
 
     @classmethod
     def from_atoms(
@@ -92,31 +94,40 @@ class LAMMPSController:
         self.work_dir.mkdir(parents=True, exist_ok=True)
         command = build_lammps_command(self.input_file, config=self.config)
         self.logger.info("starting LAMMPS command=%s work_dir=%s", command, self.work_dir)
-        stdout_handle = self.stdout_file.open("a", encoding="utf-8")
-        stderr_handle = self.stderr_file.open("a", encoding="utf-8")
-        self.process = subprocess.Popen(
-            command,
-            cwd=self.work_dir,
-            stdin=subprocess.PIPE,
-            stdout=stdout_handle,
-            stderr=stderr_handle,
-            text=True,
-        )
+        self._close_log_handles()
+        self._stdout_handle = self.stdout_file.open("a", encoding="utf-8")
+        self._stderr_handle = self.stderr_file.open("a", encoding="utf-8")
+        try:
+            self.process = subprocess.Popen(
+                command,
+                cwd=self.work_dir,
+                stdin=subprocess.PIPE,
+                stdout=self._stdout_handle,
+                stderr=self._stderr_handle,
+                text=True,
+            )
+        except Exception:
+            self._close_log_handles()
+            raise
 
     def stop(self, *, timeout: float = 10.0) -> None:
         """Terminate LAMMPS gracefully, escalating only if it does not exit."""
 
         if self.process is None or self.process.poll() is not None:
+            self._close_log_handles()
             return
         self.logger.info("stopping LAMMPS pid=%s", self.process.pid)
-        self.process.terminate()
         try:
-            self.process.wait(timeout=timeout)
-        except subprocess.TimeoutExpired:
-            self.logger.warning("LAMMPS did not stop within %.1fs; killing pid=%s", timeout, self.process.pid)
-            self.process.kill()
-            self.process.wait(timeout=timeout)
-        self.logger.info("LAMMPS stopped with returncode=%s", self.process.returncode)
+            self.process.terminate()
+            try:
+                self.process.wait(timeout=timeout)
+            except subprocess.TimeoutExpired:
+                self.logger.warning("LAMMPS did not stop within %.1fs; killing pid=%s", timeout, self.process.pid)
+                self.process.kill()
+                self.process.wait(timeout=timeout)
+            self.logger.info("LAMMPS stopped with returncode=%s", self.process.returncode)
+        finally:
+            self._close_log_handles()
 
     def pause(self) -> None:
         if self.process is not None and self.process.poll() is None:
@@ -183,6 +194,13 @@ class LAMMPSController:
                 timestep_fs=self.config.get("lammps", {}).get("timestep_fs"),
             )
         )
+
+    def _close_log_handles(self) -> None:
+        for handle in (self._stdout_handle, self._stderr_handle):
+            if handle is not None and not handle.closed:
+                handle.close()
+        self._stdout_handle = None
+        self._stderr_handle = None
 
 
 class _DumpText:

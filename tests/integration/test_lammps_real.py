@@ -10,7 +10,6 @@ import pytest
 
 from hotspot_al.io.lammps_reader import read_dump
 
-
 pytestmark = [pytest.mark.integration, pytest.mark.lammps]
 
 

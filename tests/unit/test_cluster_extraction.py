@@ -34,8 +34,8 @@ def test_cluster_extraction_assigns_core_inner_and_boundary_regions() -> None:
     assert region.original_indices == [0, 1, 2, 3]
     assert region.core_indices == [1]
     assert region.inner_buffer_indices == [0, 2]
+    assert region.outer_buffer_indices == []
     assert region.boundary_indices == [3]
-    assert region.outer_buffer_indices == [3]
 
 
 def test_single_atom_system() -> None:

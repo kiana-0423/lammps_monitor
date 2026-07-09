@@ -8,6 +8,11 @@ from ase import Atoms
 from hotspot_al.monitor.lj_residual import LJFitResult, compute_lj_residuals
 from hotspot_al.monitor.neighbor_utils import MonitorNeighbors
 
+GRAM_DET_TOL = 1.0e-12
+GRAM_CONDITION_LIMIT = 1.0e8
+SIGMA_MIN = 0.2
+SIGMA_MAX = 10.0
+
 
 def _invalid_fit() -> LJFitResult:
     return LJFitResult(epsilon=0.0, sigma=0.0, residual=1.0, valid=False)
@@ -44,7 +49,10 @@ def fit_local_lj_force_linear(
     )
     rhs = np.array([float(np.dot(a_vector, force)), float(np.dot(b_vector, force))], dtype=float)
     det = float(np.linalg.det(gram))
-    if abs(det) < 1.0e-12:
+    if abs(det) < GRAM_DET_TOL:
+        return _invalid_fit()
+    condition = float(np.linalg.cond(gram))
+    if not np.isfinite(condition) or condition > GRAM_CONDITION_LIMIT:
         return _invalid_fit()
 
     try:
@@ -55,7 +63,7 @@ def fit_local_lj_force_linear(
         return _invalid_fit()
 
     sigma = float((alpha / beta) ** (1.0 / 6.0))
-    if not np.isfinite(sigma) or sigma < 0.2 or sigma > 10.0:
+    if not np.isfinite(sigma) or sigma < SIGMA_MIN or sigma > SIGMA_MAX:
         return _invalid_fit()
 
     epsilon = float(beta / (24.0 * sigma**6))

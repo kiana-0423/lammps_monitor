@@ -5,7 +5,7 @@ from __future__ import annotations
 import numpy as np
 
 from hotspot_al.config import load_config
-from hotspot_al.monitor.ood_score import OODScorer
+from hotspot_al.monitor.ood_score import OODScorer, RunningMetricStats
 
 
 def test_physics_stage_includes_mlip_force_deviation() -> None:
@@ -93,6 +93,33 @@ def test_score_full_triggers_on_mlip_force_deviation() -> None:
     assert result.trigger_reason == ["model_drift"]
 
 
+def test_score_full_combines_multiple_trigger_reasons() -> None:
+    config = _score_config()
+    config["monitor"] = {
+        **config["monitor"],
+        "rmin_threshold": 1.0,
+        "delta_q_threshold": 1.0,
+    }
+    config["ood_score"] = {
+        **config["ood_score"],
+        "label_threshold": 0.5,
+        "running_stats": {"enabled": False, "warmup_frames": 0, "min_std": 1.0},
+    }
+    config["ood_score"]["weights"] = {key: 0.0 for key in config["ood_score"]["weights"]}
+    config["ood_score"]["weights"].update({"force": 1.0, "rmin": 1.0, "delta_q": 1.0, "lj_residual": 1.0})
+    metrics = _base_metrics(n_atoms=3)
+    metrics["force"] = np.array([1.0, 0.0, 0.0])
+    metrics["rmin"] = np.array([1.0, 0.0, 1.0])
+    metrics["delta_q"] = np.array([0.0, 0.0, 2.0])
+    metrics["lj_residual"] = np.array([0.5, 0.5, 0.5])
+
+    result = OODScorer(config).score_full(metrics, update_stats=False)
+
+    assert result.triggered
+    assert result.hotspot_indices == [0, 1, 2]
+    assert set(result.trigger_reason) >= {"force_large", "close_contact", "coordination_change", "lj_residual"}
+
+
 def test_running_stats_warmup_uses_raw_scores() -> None:
     config = _score_config()
     metrics = _base_metrics()
@@ -122,3 +149,31 @@ def test_empty_frame_returns_no_trigger() -> None:
     assert not result.triggered
     assert result.hotspot_indices == []
     assert result.max_score == 0.0
+
+
+def test_running_metric_stats_batch_matches_single_update() -> None:
+    values = np.random.default_rng(9).normal(size=1000)
+    batch = RunningMetricStats()
+    single = RunningMetricStats()
+
+    batch.update(values)
+    for value in values:
+        single.update(np.array([value]))
+
+    assert batch.count == single.count
+    assert abs(batch.mean - single.mean) < 1.0e-10
+    assert abs(batch.std - single.std) < 1.0e-10
+
+
+def test_running_metric_stats_chunked_matches_full_batch() -> None:
+    values = np.random.default_rng(10).normal(size=1000)
+    chunked = RunningMetricStats()
+    full = RunningMetricStats()
+
+    full.update(values)
+    for start in range(0, len(values), 100):
+        chunked.update(values[start : start + 100])
+
+    assert chunked.count == full.count
+    assert abs(chunked.mean - full.mean) < 1.0e-10
+    assert abs(chunked.std - full.std) < 1.0e-10

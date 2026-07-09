@@ -49,7 +49,16 @@ def mic_displacements_from_reference(
 
     reference = np.asarray(reference, dtype=float)
     positions = np.asarray(positions, dtype=float)
-    return np.vstack([mic_displacement(reference, pos, cell=cell, pbc=pbc) for pos in positions])
+    displacements = positions - reference
+    cell_matrix = as_cell_matrix(cell)
+    pbc_mask = np.broadcast_to(np.asarray(pbc, dtype=bool), 3)
+    if cell_matrix is None or not np.any(pbc_mask):
+        return displacements
+
+    inverse = np.linalg.inv(cell_matrix.T)
+    fractional = displacements @ inverse.T
+    fractional[:, pbc_mask] -= np.round(fractional[:, pbc_mask])
+    return fractional @ cell_matrix
 
 
 def mic_distance(

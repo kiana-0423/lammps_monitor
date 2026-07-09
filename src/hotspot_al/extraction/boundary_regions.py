@@ -16,10 +16,11 @@ def assign_radial_regions(
 
     distances = np.asarray(distances, dtype=float)
     boundary_start = max(core_radius, extract_radius - boundary_thickness)
+    buffer_midpoint = core_radius + 0.5 * max(boundary_start - core_radius, 0.0)
     core = np.where(distances <= core_radius)[0].tolist()
-    inner_buffer = np.where((distances > core_radius) & (distances < boundary_start))[0].tolist()
-    outer_buffer = np.where((distances >= boundary_start) & (distances <= extract_radius))[0].tolist()
-    boundary = list(outer_buffer)
+    inner_buffer = np.where((distances > core_radius) & (distances <= buffer_midpoint))[0].tolist()
+    outer_buffer = np.where((distances > buffer_midpoint) & (distances < boundary_start))[0].tolist()
+    boundary = np.where((distances >= boundary_start) & (distances <= extract_radius))[0].tolist()
     return {
         "core": core,
         "inner_buffer": inner_buffer,

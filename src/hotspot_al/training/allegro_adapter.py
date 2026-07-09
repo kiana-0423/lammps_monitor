@@ -11,6 +11,7 @@ from ase.io import write
 
 from hotspot_al.models import ExtractedRegion
 from hotspot_al.training.mask_generator import generate_atom_mask, generate_region_labels
+from hotspot_al.training.region_codes import region_codes_for_labels, region_label_map_json
 
 
 def write_allegro_dataset(
@@ -29,12 +30,9 @@ def write_allegro_dataset(
     mask = generate_atom_mask(region, config)
     atoms.arrays["forces"] = np.asarray(forces, dtype=float)
     atoms.arrays["mask_weights"] = mask
-    atoms.arrays["region_code"] = np.asarray(
-        [{"core": 0, "inner_buffer": 1, "outer_buffer": 2, "boundary": 3, "h_cap": 4}.get(label, -1) for label in generate_region_labels(region)],
-        dtype=int,
-    )
+    atoms.arrays["region_code"] = region_codes_for_labels(generate_region_labels(region))
     atoms.info["mask_weight_key"] = "mask_weights"
-    atoms.info["region_label_map"] = json.dumps({0: "core", 1: "inner_buffer", 2: "outer_buffer", 3: "boundary", 4: "h_cap"})
+    atoms.info["region_label_map"] = region_label_map_json()
     if region.metadata.get("event_id") is not None:
         atoms.info["event_id"] = region.metadata.get("event_id")
     path = target / filename

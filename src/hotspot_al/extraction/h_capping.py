@@ -7,12 +7,10 @@ from typing import Any
 
 import numpy as np
 from ase import Atoms
-from ase.data import atomic_numbers
 
 from hotspot_al.models import ExtractedRegion
 from hotspot_al.utils.neighbor import bonded_neighbors
 from hotspot_al.utils.periodic import mic_displacement
-
 
 _METAL_LIKE = {
     "Li",

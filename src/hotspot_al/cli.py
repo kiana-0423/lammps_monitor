@@ -11,7 +11,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Sequence
 
-
 DEFAULT_RUNTIME_CONFIG = Path("config") / "runtime.local.yaml"
 LMP_CANDIDATES = ("lmp_allegro", "lmp", "lammps")
 CP2K_CANDIDATES = ("cp2k.popt", "cp2k.psmp", "cp2k")

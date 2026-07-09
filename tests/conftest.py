@@ -7,7 +7,6 @@ from pathlib import Path
 
 import pytest
 
-
 TESTS_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = TESTS_DIR.parent
 

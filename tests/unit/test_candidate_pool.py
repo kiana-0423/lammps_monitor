@@ -2,9 +2,15 @@
 
 from __future__ import annotations
 
+import numpy as np
 from ase import Atoms
 
 from hotspot_al.active_learning.candidate_pool import CandidatePool
+from hotspot_al.active_learning.deduplication import (
+    CandidateFingerprint,
+    deduplicate_candidates,
+    pair_distance_histogram,
+)
 from hotspot_al.models import ExtractedRegion
 
 
@@ -79,3 +85,52 @@ def test_candidate_pool_max_candidates_larger_than_pool() -> None:
 
     assert len(selected) == 3
     assert [candidate.score for candidate in selected] == [1.5, 1.0, 0.5]
+
+
+def test_pair_distance_histogram_matches_reference_loop() -> None:
+    region = ExtractedRegion(
+        atoms=Atoms("H4", positions=[[0.0, 0.0, 0.0], [0.7, 0.0, 0.0], [0.0, 1.2, 0.0], [0.0, 0.0, 1.8]]),
+        original_indices=[0, 1, 2, 3],
+        core_indices=[0],
+        inner_buffer_indices=[1, 2, 3],
+        outer_buffer_indices=[],
+        boundary_indices=[],
+        h_cap_indices=[],
+        hotspot_indices=[0],
+    )
+    positions = region.atoms.get_positions()
+    distances = []
+    for i in range(len(positions)):
+        for j in range(i + 1, len(positions)):
+            distances.append(float(np.linalg.norm(positions[i] - positions[j])))
+    expected, _ = np.histogram(distances, bins=16, range=(0.0, 8.0), density=True)
+
+    assert np.allclose(pair_distance_histogram(region), expected)
+
+
+def test_pair_distance_histogram_empty_or_single_region_returns_zero() -> None:
+    empty = ExtractedRegion(Atoms(), [], [], [], [], [], [], [])
+    single = ExtractedRegion(Atoms("H", positions=[[0.0, 0.0, 0.0]]), [0], [0], [], [], [], [], [0])
+
+    assert np.allclose(pair_distance_histogram(empty), np.zeros(16))
+    assert np.allclose(pair_distance_histogram(single), np.zeros(16))
+
+
+def test_deduplicate_candidates_keeps_higher_score_for_identical_fingerprints() -> None:
+    fingerprint = np.array([1.0, 0.0, 0.0])
+    low = CandidateFingerprint(_region(), score=1.0, fingerprint=fingerprint, metadata={"name": "low"})
+    high = CandidateFingerprint(_region(), score=2.0, fingerprint=fingerprint.copy(), metadata={"name": "high"})
+
+    selected = deduplicate_candidates([low, high], diversity_threshold=0.1)
+
+    assert len(selected) == 1
+    assert selected[0].metadata["name"] == "high"
+
+
+def test_deduplicate_candidates_threshold_boundary_keeps_candidate() -> None:
+    left = CandidateFingerprint(_region(), score=2.0, fingerprint=np.array([0.0]), metadata={"name": "left"})
+    right = CandidateFingerprint(_region(), score=1.0, fingerprint=np.array([0.1]), metadata={"name": "right"})
+
+    selected = deduplicate_candidates([left, right], diversity_threshold=0.1)
+
+    assert [candidate.metadata["name"] for candidate in selected] == ["left", "right"]

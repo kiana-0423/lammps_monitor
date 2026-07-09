@@ -10,7 +10,6 @@ from typing import Any, Callable
 import numpy as np
 from ase import Atoms
 
-
 ForceEvaluator = Callable[[Atoms, str | Path | None, dict[str, Any]], np.ndarray]
 
 

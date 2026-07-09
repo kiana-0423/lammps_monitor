@@ -16,6 +16,7 @@ from hotspot_al.active_learning.scheduler import ScheduledTask
 from hotspot_al.cp2k.cp2k_force_parser import parse_cp2k_forces
 from hotspot_al.cp2k.cp2k_input import write_cp2k_inputs
 from hotspot_al.cp2k.cp2k_runner import build_cp2k_command
+from hotspot_al.extraction.block import BlockCooldownTracker, extract_block_regions
 from hotspot_al.extraction.cluster_extractor import extract_cluster_region
 from hotspot_al.extraction.h_capping import add_h_caps
 from hotspot_al.models import ExtractedRegion
@@ -71,11 +72,18 @@ class CP2KTaskSubmitter:
             msg = "cp2k submit mode must be one of: dry_run, local, slurm."
             raise ValueError(msg)
         self.jobs: dict[str, CP2KSubmittedJob] = {}
+        block_cfg = config.get("extraction", {}).get("block", {})
+        self.block_cooldown = BlockCooldownTracker(int(block_cfg.get("cooldown_steps", 0)))
 
     def __call__(self, task: ScheduledTask) -> None:
         """Prepare and submit one scheduled event task."""
 
-        job = self.submit(task)
+        try:
+            job = self.submit(task)
+        except Exception:
+            self.logger.exception("CP2K task submission failed for %s", task.task_id)
+            task.metadata["cp2k_job"] = {"task_id": task.task_id, "status": "failed"}
+            raise
         task.metadata["cp2k_job"] = self._job_payload(job)
 
     def submit(self, task: ScheduledTask) -> CP2KSubmittedJob:
@@ -171,8 +179,23 @@ class CP2KTaskSubmitter:
 
     def _prepare_region(self, task: ScheduledTask) -> ExtractedRegion:
         frame = task.event.trigger_frame
-        region = extract_cluster_region(frame.atoms, task.event.hotspot_atoms, config=self.config)
-        region = add_h_caps(frame.atoms, region, config=self.config)
+        if str(self.config.get("extraction", {}).get("mode", "cluster")) == "block":
+            regions = extract_block_regions(
+                frame.atoms,
+                task.event.hotspot_atoms,
+                config=self.config,
+                step=frame.step,
+                cooldown_tracker=self.block_cooldown,
+            )
+            if not regions:
+                msg = f"no block region selected for task {task.task_id}; all candidate blocks may be in cooldown."
+                raise ValueError(msg)
+            region = regions[0]
+            if len(regions) > 1:
+                region.metadata["additional_block_regions_skipped"] = len(regions) - 1
+        else:
+            region = extract_cluster_region(frame.atoms, task.event.hotspot_atoms, config=self.config)
+            region = add_h_caps(frame.atoms, region, config=self.config)
         region.metadata = {
             **region.metadata,
             "original_frame_id": frame.step,

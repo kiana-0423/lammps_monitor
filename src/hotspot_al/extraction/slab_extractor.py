@@ -49,10 +49,13 @@ def extract_slab_patch(
     local_positions = displacements[selected]
     mins = local_positions.min(axis=0)
     shifted = local_positions - mins
-    cell = atoms.cell.array.copy()
-    cell[0, 0] = max(xy_lengths[0], 1.0)
-    cell[1, 1] = max(xy_lengths[1], 1.0)
-    cell[2, 2] = max(float(shifted[:, 2].ptp() + 6.0), 6.0)
+    cell = np.diag(
+        [
+            max(xy_lengths[0], 1.0),
+            max(xy_lengths[1], 1.0),
+            max(float(np.ptp(shifted[:, 2]) + 6.0), 6.0),
+        ]
+    )
 
     extracted_atoms = Atoms(
         symbols=[atoms[index].symbol for index in selected],

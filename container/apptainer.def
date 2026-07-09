@@ -1,0 +1,23 @@
+Bootstrap: docker
+From: python:3.11-slim
+
+%files
+    pyproject.toml /app/pyproject.toml
+    README.md /app/README.md
+    src /app/src
+
+%post
+    python -m pip install --no-cache-dir --upgrade pip setuptools wheel
+    cd /app
+    python -m pip install --no-cache-dir -e ".[dev]"
+
+%environment
+    export PYTHONUNBUFFERED=1
+
+%runscript
+    cd /app
+    exec python -m pytest -q "$@"
+
+%labels
+    Author PHAL contributors
+    Description Base CPU-only hotspot_al development image without Torch/CUDA.

@@ -6,9 +6,9 @@ from pathlib import Path
 
 import numpy as np
 from ase.io import read
-
 from fake_backends.fake_allegro import fake_committee_evaluator
 from fake_backends.fake_cp2k import write_fake_cp2k_force_output
+
 from hotspot_al.config import load_config
 from hotspot_al.cp2k.cp2k_force_parser import parse_cp2k_forces
 from hotspot_al.cp2k.cp2k_input import write_cp2k_inputs

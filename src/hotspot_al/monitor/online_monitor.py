@@ -5,13 +5,14 @@ from __future__ import annotations
 import json
 from collections.abc import Callable, Iterable
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any
 
 import numpy as np
 from ase.io import write
 
 from hotspot_al.active_learning.scheduler import OnlineEventScheduler
 from hotspot_al.buffer.rolling_buffer import RollingBuffer
+from hotspot_al.exceptions import DataError
 from hotspot_al.models import EventRecord, FrameData, OODFrameResult
 from hotspot_al.monitor.committee_deviation import committee_force_deviation
 from hotspot_al.monitor.coordination_monitor import coordination_deltas, smooth_coordination_numbers_fast
@@ -19,17 +20,10 @@ from hotspot_al.monitor.force_monitor import delta_force_norms, force_norms
 from hotspot_al.monitor.geometry_monitor import displacement_norms, minimum_neighbor_distances_fast
 from hotspot_al.monitor.neighbor_utils import MonitorNeighbors
 from hotspot_al.monitor.ood_score import OODScorer
+from hotspot_al.protocols import FrameSource
 from hotspot_al.training.allegro_runner import AllegroRunner
-from hotspot_al.exceptions import DataError
 from hotspot_al.utils.geometry import row_norms
 from hotspot_al.utils.logging import configure_logging
-
-
-class FrameSource(Protocol):
-    """Small protocol shared by LAMMPSController and fake online sources."""
-
-    def next_frame(self, timeout: float | None = None) -> FrameData | None: ...
-
 
 EventCallback = Callable[[EventRecord], None]
 ProgressCallback = Callable[[dict[str, Any]], None]
@@ -95,32 +89,14 @@ class OnlineMonitor:
         consecutive_errors = 0
         self.logger.info("starting online monitor")
         try:
-            while max_frames is None or processed < max_frames:
+            while not self._should_stop(processed, max_frames=max_frames):
                 try:
                     frame = self._next_frame(timeout=frame_timeout)
                     if frame is None:
                         self.logger.info("frame source exhausted after %d frames", processed)
                         break
-                    result = self.process_frame(frame, frame_index=processed)
+                    result = self._process_online_frame(frame, frame_index=processed)
                     results.append(result)
-                    self._record_progress(result)
-                    event = self.buffer.push(frame)
-                    finalized_event = event is not None
-                    if event is not None:
-                        self._handle_event(event)
-                    if result.triggered and not finalized_event and self._last_event_step != frame.step:
-                        completed = self.buffer.capture_event(
-                            frame,
-                            hotspot_atoms=result.hotspot_indices,
-                            ood_scores=result.atom_scores,
-                            trigger_reason=result.trigger_reason,
-                            backend=self.config.get("backend", {}).get("mlip"),
-                            model_version=self._model_version(),
-                            metadata={"ood": result.metadata},
-                        )
-                        self._last_event_step = frame.step
-                        if completed is not None:
-                            self._handle_event(completed)
                     processed += 1
                     consecutive_errors = 0
                 except Exception:
@@ -136,6 +112,41 @@ class OnlineMonitor:
             if event is not None:
                 self._handle_event(event)
         return results
+
+    def _should_stop(self, processed: int, *, max_frames: int | None) -> bool:
+        """Return True when the run loop has processed enough frames."""
+
+        return max_frames is not None and processed >= max_frames
+
+    def _process_online_frame(self, frame: FrameData, *, frame_index: int) -> OODFrameResult:
+        """Score one online frame and capture any resulting event."""
+
+        result = self.process_frame(frame, frame_index=frame_index)
+        self._record_progress(result)
+        event = self.buffer.push(frame)
+        finalized_event = event is not None
+        if event is not None:
+            self._handle_event(event)
+        self._handle_trigger(frame, result, finalized_event=finalized_event)
+        return result
+
+    def _handle_trigger(self, frame: FrameData, result: OODFrameResult, *, finalized_event: bool) -> None:
+        """Capture a new event for a triggered frame when not already finalized."""
+
+        if not result.triggered or finalized_event or self._last_event_step == frame.step:
+            return
+        completed = self.buffer.capture_event(
+            frame,
+            hotspot_atoms=result.hotspot_indices,
+            ood_scores=result.atom_scores,
+            trigger_reason=result.trigger_reason,
+            backend=self.config.get("backend", {}).get("mlip"),
+            model_version=self._model_version(),
+            metadata={"ood": result.metadata},
+        )
+        self._last_event_step = frame.step
+        if completed is not None:
+            self._handle_event(completed)
 
     def _handle_event(self, event: EventRecord) -> None:
         self._stats["events"] += 1

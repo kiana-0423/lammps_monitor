@@ -8,8 +8,8 @@ import numpy as np
 import pytest
 from ase import Atoms
 
-from hotspot_al.lammps.allegro_lammps import AllegroBackend
 from hotspot_al.backends.allegro_inference import AllegroInference
+from hotspot_al.lammps.allegro_lammps import AllegroBackend
 from hotspot_al.training.allegro_runner import (
     AllegroRunner,
     build_allegro_export_command,
@@ -91,6 +91,32 @@ def test_allegro_runner_from_config_wires_inference(monkeypatch: pytest.MonkeyPa
 def test_allegro_runner_from_config_requires_model_paths() -> None:
     with pytest.raises(ValueError, match="deployed_model_paths or allegro.model_paths"):
         AllegroRunner.from_config({"allegro": {"model_paths": []}})
+
+
+def test_allegro_inference_missing_model_path_is_fatal(tmp_path: Path) -> None:
+    inference = AllegroInference([tmp_path / "missing.pth"], device="cpu")
+
+    with pytest.raises(FileNotFoundError, match="does not exist"):
+        inference.predict_forces(Atoms("H", positions=[[0.0, 0.0, 0.0]]))
+
+
+def test_allegro_inference_runtime_failure_returns_nan_and_logs(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+    deployed = tmp_path / "deployed.pth"
+    deployed.write_bytes(b"placeholder")
+    inference = AllegroInference([deployed], device="cpu")
+    atoms = Atoms("H2", positions=np.zeros((2, 3)))
+
+    monkeypatch.setattr(inference, "_load_model", lambda model_path: object())
+
+    def fail_call(*_args: object, **_kwargs: object) -> np.ndarray:
+        raise ValueError("bad output")
+
+    monkeypatch.setattr(inference, "_call_model", fail_call)
+
+    forces = inference.predict_forces(atoms)
+
+    assert np.isnan(forces).all()
+    assert "returning NaN forces" in caplog.text
 
 
 def test_allegro_runner_builds_train_and_export_commands_from_templates() -> None:

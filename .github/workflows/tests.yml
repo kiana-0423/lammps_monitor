@@ -26,3 +26,7 @@ jobs:
         run: python -m mypy
       - name: Run offline tests
         run: bash tests/scripts/run_all_offline.sh
+      - name: Coverage report
+        run: python -m pytest tests/unit --cov=hotspot_al --cov-report=term-missing
+      - name: Performance smoke benchmark
+        run: python tests/scripts/benchmark_monitor.py --atoms 100 --repeats 1 --json-output benchmark.json --warn-only

@@ -6,6 +6,7 @@ not require torch or nequip; constructing an evaluator for real inference does.
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -13,6 +14,8 @@ import numpy as np
 from ase import Atoms
 
 from hotspot_al.training.allegro_runner import ForceEvaluator
+
+logger = logging.getLogger(__name__)
 
 
 class AllegroInference:
@@ -101,7 +104,10 @@ class AllegroInference:
         try:
             model = self._load_model(model_path)
             return self._call_model(model, atoms, config=config or {})
-        except Exception:
+        except FileNotFoundError:
+            raise
+        except Exception as exc:
+            logger.warning("Allegro force prediction failed; returning NaN forces: %s", exc)
             return np.full((len(atoms), 3), np.nan, dtype=float)
 
     def predict_committee(self, atoms: Atoms, *, config: dict[str, Any] | None = None) -> np.ndarray:

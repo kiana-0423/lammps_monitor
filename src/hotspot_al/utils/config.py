@@ -10,7 +10,6 @@ import yaml
 
 from hotspot_al.config_schema import validate_config
 
-
 DEFAULT_CONFIG_PATH = Path(__file__).resolve().parents[3] / "config" / "default.yaml"
 
 

@@ -17,9 +17,25 @@ Important sections:
 - `ood_score`: metric weights, trigger thresholds, running-stat settings.
 - `buffer`: pre/post trigger frame counts.
 - `extraction`: local region size, core/buffer radii, max/min atoms.
+- `extraction.block`: block-mode settings used when `extraction.mode=block`.
+  Current implementation supports `scheme: spatial_grid`, maps OOD atoms to
+  stable block ids, optionally merges 26-neighbor-connected blocks, and applies
+  cooldown before re-submitting a block for DFT labeling.
+  - `size`: three block dimensions in Angstrom, for example `[12.0, 12.0, 12.0]`.
+  - `halo`: context distance beyond the block core.
+  - `merge_adjacent`: merge adjacent anomalous blocks before extraction.
+  - `max_merged_blocks`: cap merged block group size.
+  - `cooldown_steps`: minimum MD steps before the same block can be labeled again.
+  - `buffer.inner`: distance from core atoms to inner-buffer outer edge.
+  - `buffer.outer`: distance from core atoms to outer-buffer outer edge.
+  - `frozen.enabled`: include a frozen boundary shell for CP2K constraints.
+  - `frozen.thickness`: frozen shell thickness.
+  - `max_atoms` / `min_atoms`: atom-count bounds for extracted block regions.
 - `h_capping`: conservative hydrogen capping controls.
 - `cp2k`: CP2K executable, DFT settings, submit mode, retry settings.
-- `training_mask`: atom-wise supervision weights by region label.
+- `training_mask`: atom-wise supervision weights by region label. Block mode
+  accepts `label_core` and `frozen_boundary` aliases alongside the existing
+  `core` and `boundary` keys.
 - `retraining`: optional automatic retraining trigger settings.
 
 `validate_config()` checks required keys, nested value types, positive ranges,

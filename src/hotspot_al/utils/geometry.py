@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import numpy as np
 
-from .periodic import mic_displacements_from_reference
+from .periodic import as_cell_matrix, mic_displacements_from_reference
+
+_DISTANCE_MATRIX_GROUP_CHUNK = 128
 
 
 def row_norms(values: np.ndarray) -> np.ndarray:
@@ -42,14 +44,18 @@ def distances_to_group(
     distances = np.full(len(positions), np.inf, dtype=float)
     if not group_indices:
         return distances
-    for index in group_indices:
-        displacements = mic_displacements_from_reference(
-            positions[index],
-            positions,
-            cell=cell,
-            pbc=pbc,
-        )
-        distances = np.minimum(distances, row_norms(displacements))
+    group = positions[np.asarray(group_indices, dtype=int)]
+    cell_matrix = as_cell_matrix(cell)
+    pbc_mask = np.broadcast_to(np.asarray(pbc, dtype=bool), 3)
+    inverse = np.linalg.inv(cell_matrix.T) if cell_matrix is not None and np.any(pbc_mask) else None
+    for start in range(0, len(group), _DISTANCE_MATRIX_GROUP_CHUNK):
+        references = group[start : start + _DISTANCE_MATRIX_GROUP_CHUNK]
+        displacements = positions[None, :, :] - references[:, None, :]
+        if inverse is not None and cell_matrix is not None:
+            fractional = displacements @ inverse.T
+            fractional[:, :, pbc_mask] -= np.round(fractional[:, :, pbc_mask])
+            displacements = fractional @ cell_matrix
+        distances = np.minimum(distances, np.min(np.linalg.norm(displacements, axis=2), axis=0))
     return distances
 
 

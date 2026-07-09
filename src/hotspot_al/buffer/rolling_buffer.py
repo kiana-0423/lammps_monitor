@@ -93,20 +93,24 @@ class RollingBuffer:
     def _finalize_pending(self) -> EventRecord:
         assert self._pending is not None
         pending = self._pending
-        event = EventRecord(
-            pre_frames=pending.pre_frames,
-            trigger_frame=pending.trigger_frame,
-            post_frames=pending.post_frames,
-            hotspot_atoms=pending.hotspot_atoms,
-            ood_scores=pending.ood_scores,
-            trigger_reason=pending.trigger_reason,
-            step=pending.trigger_frame.step,
-            time=pending.trigger_frame.time,
-            event_id=pending.metadata.get("event_id"),
-            backend=pending.metadata.get("backend"),
-            model_version=pending.metadata.get("model_version"),
-            metadata=pending.metadata,
-        )
-        self.events.append(event)
+        try:
+            event = EventRecord(
+                pre_frames=pending.pre_frames,
+                trigger_frame=pending.trigger_frame,
+                post_frames=pending.post_frames,
+                hotspot_atoms=pending.hotspot_atoms,
+                ood_scores=pending.ood_scores,
+                trigger_reason=pending.trigger_reason,
+                step=pending.trigger_frame.step,
+                time=pending.trigger_frame.time,
+                event_id=pending.metadata.get("event_id"),
+                backend=pending.metadata.get("backend"),
+                model_version=pending.metadata.get("model_version"),
+                metadata=pending.metadata,
+            )
+            self.events.append(event)
+        except Exception:
+            self._pending = pending
+            raise
         self._pending = None
         return event

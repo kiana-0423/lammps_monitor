@@ -197,8 +197,8 @@ class ModelRegistry:
                         fcntl.flock(lock_file.fileno(), mode | fcntl.LOCK_NB)
                     else:
                         lock_file.seek(0)
-                        mode = msvcrt.LK_NBLCK if exclusive else msvcrt.LK_NBRLCK
-                        msvcrt.locking(lock_file.fileno(), mode, 1)
+                        mode = msvcrt.LK_NBLCK if exclusive else msvcrt.LK_NBRLCK  # type: ignore[attr-defined]
+                        msvcrt.locking(lock_file.fileno(), mode, 1)  # type: ignore[attr-defined]
                     break
                 except (BlockingIOError, OSError) as exc:
                     if time.monotonic() >= deadline:
@@ -212,7 +212,7 @@ class ModelRegistry:
                     fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
                 else:
                     lock_file.seek(0)
-                    msvcrt.locking(lock_file.fileno(), msvcrt.LK_UNLCK, 1)
+                    msvcrt.locking(lock_file.fileno(), msvcrt.LK_UNLCK, 1)  # type: ignore[attr-defined]
 
     def _to_json(self, model: ModelVersion) -> dict[str, Any]:
         return {
