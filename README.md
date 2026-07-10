@@ -144,6 +144,10 @@ from hotspot_al import load_config
 config = load_config("config/runtime.local.yaml")
 ```
 
+Milestone 1 另建立了 [`configs/`](configs/) 容器部署配置框架，包括 `default.yaml`、
+`runtime.yaml`、`train.yaml`、`lammps.yaml` 和 `cp2k.yaml`。这些文件目前是空模板，
+不会替换现有应用配置；后续配置迁移应保持旧加载路径兼容。
+
 Backend 选择采用嵌套结构：
 
 ```yaml
@@ -327,15 +331,29 @@ src/hotspot_al/
 
 ## 容器与 HPC
 
-仓库当前提供用于开发和测试的 CPU-only 容器：
+Milestone 1 已建立容器工程框架，但不安装 Python、CUDA、Torch、MLIP、LAMMPS、
+CP2K 或 MPI。四个角色镜像目前都是只有 `FROM`、OCI labels、`WORKDIR` 和 `ENV`
+的模板：
 
 ```bash
-docker build -t phal-dev .
-docker run --rm phal-dev
+containers/build.sh plan base
+containers/build.sh plan md
+containers/build.sh plan train
+containers/build.sh plan cp2k
 ```
 
-该镜像不包含 CUDA、Allegro、带 MLIP pair style 的 LAMMPS 或 CP2K。HPC 环境可参考
-[`container/apptainer.def`](container/apptainer.def) 构建 Apptainer 镜像。
+版本统一记录在 [`containers/versions.yaml`](containers/versions.yaml)，禁止 Dockerfile
+独立使用 `latest`。完整构建接口和镜像职责见
+[`containers/README.md`](containers/README.md)。
+
+Dockerfile 是唯一环境来源。Apptainer/Singularity 不维护第二套安装脚本，只执行：
+
+```text
+Dockerfile → OCI image → Apptainer conversion → SIF
+```
+
+所有运行数据写入 [`runtime/`](runtime/README.md)，并在容器中挂载到 `/runtime`。
+模型、轨迹、checkpoint、dataset、日志、cache、OCI archive 和 SIF 均由 Git 忽略。
 
 生产环境建议：
 
@@ -344,6 +362,13 @@ docker run --rm phal-dev
 - 模型、轨迹、标注数据和注册表通过只读/可写 volume 挂载；
 - GPU 驱动由宿主机提供，CUDA/PyTorch/MLIP runtime 固定在镜像中；
 - MPI 镜像必须与目标集群 ABI 和启动方式一起验证。
+
+容器设计文档：
+
+- [Container Architecture](docs/container/architecture.md)
+- [Docker and OCI](docs/container/docker.md)
+- [Apptainer / Singularity](docs/container/apptainer.md)
+- [Runtime Data Contract](docs/container/runtime.md)
 
 ## 测试
 

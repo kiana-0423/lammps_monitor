@@ -1,0 +1,4 @@
+# Milestone 1 container/deployment configuration template.
+# Application defaults remain in config/default.yaml until configuration
+# migration is implemented in a later milestone.
+{}

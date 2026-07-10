@@ -7,6 +7,11 @@ theme:
 nav:
   - Home: index.md
   - Architecture: architecture.md
+  - Container:
+      - Architecture: container/architecture.md
+      - Docker and OCI: container/docker.md
+      - Apptainer: container/apptainer.md
+      - Runtime Data: container/runtime.md
   - Configuration: config-reference.md
   - Online Mode: online-mode.md
   - Performance: performance.md

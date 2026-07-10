@@ -17,3 +17,33 @@ results/
 checkpoints/
 *.log
 config/runtime.local.yaml
+
+# PHAL runtime data: keep only the documented directory skeleton.
+runtime/**
+!runtime/**/
+!runtime/**/.gitkeep
+!runtime/README.md
+
+# Container build and deployment artifacts.
+*.sif
+*.oci.tar
+*.docker.tar
+.docker/
+.buildx-cache/
+containers/.cache/
+docker-cache/
+
+# Operational scientific artifacts outside runtime/ are also forbidden.
+/datasets/
+/models/
+/checkpoints/
+/logs/
+*.ckpt
+*.checkpoint
+*.pth
+*.pt
+*.lammpstrj
+*.dcd
+*.xtc
+*.trr
+*.extxyz

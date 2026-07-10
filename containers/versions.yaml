@@ -1,0 +1,15 @@
+# Central version manifest for every PHAL container image.
+# `null` means deliberately unresolved for Milestone 1, never "latest".
+schema_version: 1
+infrastructure_revision: "m1"
+image_tag: "m1-scaffold"
+
+ubuntu: "24.04"
+cuda: null
+python: null
+torch: null
+nequip: null
+allegro: null
+lammps: null
+cp2k: null
+mpi: null
