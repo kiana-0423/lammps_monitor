@@ -31,7 +31,7 @@ def main() -> int:
         hotspot_indices=[0],
         trigger_reason=["force_large"],
         triggered=True,
-        metadata={"backend": config["backend"]["mlip"], "event_id": "evt-demo"},
+        metadata={"backend": config["backend"]["mlip"]["engine"], "event_id": "evt-demo"},
     )
     regions = extract_regions_for_result(frame, result, config=config)
     print("n_regions:", len(regions))

@@ -10,6 +10,7 @@ import numpy as np
 from ase import Atoms
 
 from hotspot_al.active_learning.scheduler import OnlineEventScheduler
+from hotspot_al.backends.allegro import RealAllegroBackend
 from hotspot_al.config import load_config
 from hotspot_al.cp2k.cp2k_task_submitter import CP2KTaskSubmitter
 from hotspot_al.lammps.allegro_lammps import AllegroBackend
@@ -45,7 +46,7 @@ def main() -> None:
 
     cp2k_submitter = CP2KTaskSubmitter(config=config, mode="dry_run")
     scheduler = OnlineEventScheduler(submitter=cp2k_submitter)
-    runner = AllegroRunner(force_evaluator=fake_force_evaluator)
+    mlip_backend = RealAllegroBackend(runner=AllegroRunner(force_evaluator=fake_force_evaluator), config=config)
 
     source: Any = fake_frames()
 
@@ -60,7 +61,7 @@ def main() -> None:
             work_dir=config["online"]["work_dir"],
         )
 
-    monitor = OnlineMonitor(config=config, runner=runner, frame_source=source, scheduler=scheduler)
+    monitor = OnlineMonitor(config=config, mlip_backend=mlip_backend, frame_source=source, scheduler=scheduler)
     results = monitor.run(max_frames=100)
 
     print(f"processed_frames={len(results)}")

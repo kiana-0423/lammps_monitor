@@ -1,12 +1,20 @@
 project:
   name: hotspot_active_learning
   method_name: PHAL
-  description: physics-aware hotspot active learning for Allegro-LAMMPS-CP2K
+  description: physics-aware hotspot active learning platform
 
 backend:
-  mlip: allegro
-  md_engine: lammps
-  dft_engine: cp2k
+  md:
+    engine: lammps
+  mlip:
+    engine: allegro
+  dft:
+    engine: cp2k
+  scheduler:
+    engine: local
+
+# Free-form, namespaced configuration consumed only by external backend plugins.
+plugins: {}
 
 lammps:
   executable: lmp
@@ -198,6 +206,10 @@ retraining:
 
 model_registry:
   root_dir: ./model_registry
+
+datasets:
+  labeled_dir: ./labeled_data
+  training_dir: ./training_data
 
 training_mask:
   core: 1.0

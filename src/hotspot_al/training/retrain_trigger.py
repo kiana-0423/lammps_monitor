@@ -10,7 +10,8 @@ from typing import Any
 
 from ase.io import read, write
 
-from hotspot_al.training.allegro_runner import AllegroRunner
+from hotspot_al.backends.base import MLIPBackend
+from hotspot_al.backends.factory import create_mlip_backend
 from hotspot_al.training.model_registry import ModelRegistry, ModelVersion
 from hotspot_al.utils.logging import configure_logging
 
@@ -30,31 +31,45 @@ class RetrainResult:
 
 
 class RetrainTrigger:
-    """Collect labeled extxyz samples and trigger Allegro retraining."""
+    """Collect labeled samples and trigger the configured MLIP backend."""
 
     def __init__(
         self,
         *,
         config: dict[str, Any],
-        runner: AllegroRunner | None = None,
+        mlip_backend: MLIPBackend | None = None,
+        runner: Any | None = None,
         registry: ModelRegistry | None = None,
         labeled_dir: str | Path | None = None,
         dataset_dir: str | Path | None = None,
         state_path: str | Path | None = None,
     ) -> None:
         retrain_cfg = config.get("retraining", {})
-        allegro_cfg = config.get("allegro", {})
-        cp2k_cfg = config.get("cp2k", {})
+        datasets_cfg = config.get("datasets", {})
+        legacy_mlip_cfg = config.get("allegro", {})
+        legacy_dft_cfg = config.get("cp2k", {})
         self.config = config
-        self.runner = runner or AllegroRunner()
+        if mlip_backend is not None and runner is not None:
+            raise ValueError("Pass mlip_backend or the legacy runner argument, not both.")
+        self.mlip_backend = mlip_backend or create_mlip_backend(config, legacy_runner=runner)
+        self.runner = runner
         self.registry = registry
-        self.labeled_dir = Path(labeled_dir or cp2k_cfg.get("labeled_dataset_dir", "./labeled_data"))
-        self.dataset_dir = Path(dataset_dir or allegro_cfg.get("dataset_dir") or "./training_data")
+        self.labeled_dir = Path(
+            labeled_dir
+            or datasets_cfg.get("labeled_dir")
+            or legacy_dft_cfg.get("labeled_dataset_dir", "./labeled_data")
+        )
+        self.dataset_dir = Path(
+            dataset_dir
+            or datasets_cfg.get("training_dir")
+            or legacy_mlip_cfg.get("dataset_dir")
+            or "./training_data"
+        )
         self.state_path = Path(state_path or retrain_cfg.get("state_path", self.dataset_dir / "retrain_state.json"))
         self.min_new_samples = int(retrain_cfg.get("min_new_samples", retrain_cfg.get("sample_trigger", 10)))
         self.interval_hours = float(retrain_cfg.get("interval_hours", 24.0))
         self.dry_run = bool(retrain_cfg.get("dry_run", True))
-        self.export_dir = Path(retrain_cfg.get("export_dir", allegro_cfg.get("export_dir", self.dataset_dir / "exports")))
+        self.export_dir = Path(retrain_cfg.get("export_dir", legacy_mlip_cfg.get("export_dir", self.dataset_dir / "exports")))
         self.logger = configure_logging(config, name=__name__)
 
     def check_and_run(self, *, force: bool = False) -> RetrainResult:
@@ -102,7 +117,7 @@ class RetrainTrigger:
         return sorted(path for path in self.labeled_dir.rglob("*.extxyz") if path.is_file())
 
     def merge_samples(self, samples: list[Path]) -> Path:
-        """Merge extxyz samples into the configured Allegro dataset directory."""
+        """Merge extxyz samples into the configured platform dataset directory."""
 
         self.dataset_dir.mkdir(parents=True, exist_ok=True)
         atoms_list = []
@@ -133,12 +148,15 @@ class RetrainTrigger:
         return None
 
     def _execute_training(self) -> tuple[Any, Any]:
-        """Run Allegro training and export for the merged dataset."""
+        """Run training and export through the configured MLIP contract."""
 
-        self.config.setdefault("allegro", {})["dataset_dir"] = str(self.dataset_dir)
-        self.config["allegro"].setdefault("train_output_dir", str(self.dataset_dir / "runs"))
-        train_result = self.runner.train(config=self.config, dry_run=self.dry_run)
-        export_result = self.runner.export_model(self.export_dir, config=self.config, dry_run=self.dry_run)
+        output_dir = Path(self.config.get("retraining", {}).get("train_output_dir", self.dataset_dir / "runs"))
+        checkpoint_value = self.config.get("retraining", {}).get("checkpoint_path")
+        if checkpoint_value is None:
+            checkpoint_value = self.config.get("allegro", {}).get("checkpoint_path")
+        checkpoint = None if checkpoint_value is None else Path(checkpoint_value)
+        train_result = self.mlip_backend.train(self.dataset_dir, output_dir, dry_run=self.dry_run)
+        export_result = self.mlip_backend.export_model(checkpoint, self.export_dir, dry_run=self.dry_run)
         return train_result, export_result
 
     def _update_state(self, *, sample_count: int, reason: str) -> None:
@@ -156,7 +174,7 @@ class RetrainTrigger:
         if model_path is None:
             return None
         model = self.registry.register_model(model_path, training_set_size=sample_count)
-        self.registry.deploy(config=self.config)
+        self.registry.deploy(inference=self.mlip_backend)
         return model
 
     def _load_state(self) -> dict[str, Any]:

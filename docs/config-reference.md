@@ -6,7 +6,9 @@ The default configuration lives in `config/default.yaml` and is validated by
 
 Important sections:
 
-- `backend`: selected MLIP, MD, and DFT engines.
+- `backend`: nested `md`, `mlip`, `dft`, and `scheduler` engine selections.
+- `datasets`: backend-neutral labeled and training dataset locations.
+- `plugins`: free-form namespaced settings owned by third-party backends.
 - `lammps`: executable, dump fields, atom type map, timestep, input templates.
 - `allegro`: model paths, deployed model paths, train/export command templates.
 - `allegro_model_input`: optional extra model-input fields passed to

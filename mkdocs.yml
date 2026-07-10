@@ -1,11 +1,12 @@
 site_name: PHAL / hotspot_al
-site_description: Physics-aware hotspot active learning for Allegro-LAMMPS-CP2K workflows.
+site_description: Physics-aware Hotspot Active Learning Platform.
 
 theme:
   name: mkdocs
 
 nav:
   - Home: index.md
+  - Architecture: architecture.md
   - Configuration: config-reference.md
   - Online Mode: online-mode.md
   - Performance: performance.md

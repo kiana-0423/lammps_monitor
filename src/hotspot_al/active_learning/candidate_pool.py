@@ -1,4 +1,4 @@
-"""Candidate pool management for CP2K labeling selection."""
+"""Candidate pool management for backend-neutral labeling selection."""
 
 from __future__ import annotations
 

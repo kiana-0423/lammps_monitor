@@ -1,4 +1,4 @@
-"""Compatibility import for the backend-neutral dataset writer."""
+"""Backend-neutral dataset management facade."""
 
 from hotspot_al.datasets.writer import write_dataset_entry
 

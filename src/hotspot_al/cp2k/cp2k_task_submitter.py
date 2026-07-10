@@ -13,14 +13,13 @@ from typing import Any
 from ase.io import write
 
 from hotspot_al.active_learning.scheduler import ScheduledTask
-from hotspot_al.cp2k.cp2k_force_parser import parse_cp2k_forces
-from hotspot_al.cp2k.cp2k_input import write_cp2k_inputs
-from hotspot_al.cp2k.cp2k_runner import build_cp2k_command
+from hotspot_al.backends.base import BackendJob, DFTBackend, JobState, SchedulerBackend
+from hotspot_al.backends.factory import create_typed_backend
+from hotspot_al.datasets import write_dataset_entry
 from hotspot_al.extraction.block import BlockCooldownTracker, extract_block_regions
 from hotspot_al.extraction.cluster_extractor import extract_cluster_region
 from hotspot_al.extraction.h_capping import add_h_caps
 from hotspot_al.models import ExtractedRegion
-from hotspot_al.training.dataset_writer import write_dataset_entry
 from hotspot_al.training.mask_generator import generate_atom_mask
 from hotspot_al.utils.logging import configure_logging
 
@@ -40,6 +39,7 @@ class CP2KSubmittedJob:
     attempts: int = 1
     started_at: float | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
+    scheduler_job: BackendJob | None = None
 
 
 class CP2KTaskSubmitter:
@@ -59,6 +59,8 @@ class CP2KTaskSubmitter:
         dataset_dir: str | Path | None = None,
         mode: str | None = None,
         max_retries: int | None = None,
+        dft_backend: DFTBackend | None = None,
+        scheduler_backend: SchedulerBackend | None = None,
     ) -> None:
         cp2k_cfg = config.get("cp2k", {})
         self.config = config
@@ -68,9 +70,14 @@ class CP2KTaskSubmitter:
         self.max_retries = int(max_retries if max_retries is not None else cp2k_cfg.get("max_retries", 0))
         self.max_walltime_seconds = _resolve_walltime_seconds(config)
         self.logger = configure_logging(config, name=__name__)
-        if self.mode not in {"dry_run", "local", "slurm"}:
-            msg = "cp2k submit mode must be one of: dry_run, local, slurm."
+        if self.mode not in {"dry_run", "local", "slurm", "pbs"}:
+            msg = "DFT submit mode must be one of: dry_run, local, slurm, pbs."
             raise ValueError(msg)
+        self.dft_backend = dft_backend or create_typed_backend(config, "dft", DFTBackend)
+        self.scheduler_backend = scheduler_backend
+        if self.scheduler_backend is None and self.mode != "dry_run":
+            effective_config = {**config, "backend": {**config.get("backend", {}), "scheduler": {"engine": self.mode}}}
+            self.scheduler_backend = create_typed_backend(effective_config, "scheduler", SchedulerBackend)
         self.jobs: dict[str, CP2KSubmittedJob] = {}
         block_cfg = config.get("extraction", {}).get("block", {})
         self.block_cooldown = BlockCooldownTracker(int(block_cfg.get("cooldown_steps", 0)))
@@ -94,7 +101,7 @@ class CP2KTaskSubmitter:
         self.logger.info("preparing CP2K task %s", task.task_id)
         region = self._prepare_region(task)
         write(task_dir / "region.extxyz", region.atoms, format="extxyz")
-        written = write_cp2k_inputs(region, task_dir, config=self.config, job_name=task.task_id)
+        written = self.dft_backend.prepare_inputs(region, task_dir, task_id=task.task_id)
         input_file = written.get("single_point_input") or next(iter(written.values()))
         output_file = task_dir / f"{Path(input_file).stem}.out"
         metadata = {
@@ -115,10 +122,8 @@ class CP2KTaskSubmitter:
             status="prepared" if self.mode == "dry_run" else "submitted",
             metadata={"region": region, **metadata},
         )
-        if self.mode == "local":
-            job.process = self._submit_local(job)
-        elif self.mode == "slurm":
-            job.job_id = self._submit_slurm(job)
+        if self.mode in {"local", "slurm", "pbs"}:
+            self._submit_with_scheduler(job)
         self.jobs[task.task_id] = job
         self.logger.info("CP2K task %s status=%s mode=%s", task.task_id, job.status, job.mode)
         return job
@@ -129,6 +134,20 @@ class CP2KTaskSubmitter:
         job = self.jobs[task_id]
         if job.mode == "dry_run":
             return job
+        if job.scheduler_job is not None and self.scheduler_backend is not None:
+            scheduler_state = self.scheduler_backend.poll(job.scheduler_job)
+            if scheduler_state in {JobState.SUBMITTED, JobState.PENDING, JobState.RUNNING}:
+                if self._timed_out(job):
+                    self.scheduler_backend.cancel(job.scheduler_job)
+                    job.status = "failed"
+                    job.metadata["error"] = f"DFT task exceeded max walltime of {self.max_walltime_seconds:.1f}s."
+                    return self._retry_or_return(job)
+                job.status = "running" if scheduler_state == JobState.RUNNING else "pending"
+                return job
+            if scheduler_state in {JobState.FAILED, JobState.CANCELLED}:
+                job.status = "failed"
+                job.metadata["error"] = f"Scheduler reported {scheduler_state.value}."
+                return self._retry_or_return(job)
         if job.process is not None and job.process.poll() is None:
             if self._timed_out(job):
                 self.logger.warning("CP2K task %s exceeded walltime; terminating", task_id)
@@ -156,13 +175,13 @@ class CP2KTaskSubmitter:
             self.logger.warning("CP2K task %s failed: %s", task_id, job.metadata["error"])
             return self._retry_or_return(job)
         output_text = job.output_file.read_text(encoding="utf-8", errors="ignore")
-        if not _looks_converged(output_text):
+        if not self.dft_backend.output_is_complete(output_text):
             job.status = "failed"
             job.metadata["error"] = "CP2K output did not contain an SCF convergence marker."
             self.logger.warning("CP2K task %s failed: %s", task_id, job.metadata["error"])
             return self._retry_or_return(job)
         region = job.metadata["region"]
-        forces = parse_cp2k_forces(job.output_file)
+        forces = self.dft_backend.parse_forces(job.output_file)
         mask = generate_atom_mask(region, self.config)
         written = write_dataset_entry(
             region,
@@ -205,7 +224,8 @@ class CP2KTaskSubmitter:
         return region
 
     def _submit_local(self, job: CP2KSubmittedJob) -> subprocess.Popen[str]:
-        command = build_cp2k_command(job.input_file, config=self.config)
+        request = self.dft_backend.execution_request(job.input_file, output_file=job.output_file)
+        command = list(request.command)
         self.logger.info("submitting local CP2K task %s command=%s", job.task_id, command)
         stdout_handle = job.output_file.open("w", encoding="utf-8")
         stderr_handle = (job.work_dir / f"{job.input_file.stem}.err").open("w", encoding="utf-8")
@@ -219,7 +239,8 @@ class CP2KTaskSubmitter:
         )
 
     def _submit_slurm(self, job: CP2KSubmittedJob) -> str | None:
-        command = " ".join([*build_cp2k_command(job.input_file.name, config=self.config), ">", job.output_file.name])
+        request = self.dft_backend.execution_request(job.input_file, output_file=job.output_file)
+        command = " ".join([*request.command, ">", job.output_file.name])
         script = "\n".join(
             [
                 "#!/bin/bash",
@@ -259,9 +280,32 @@ class CP2KTaskSubmitter:
         job.input_file = retry_input
         job.output_file = job.work_dir / f"{retry_input.stem}.out"
         self.logger.info("retrying CP2K task %s attempt=%d", job.task_id, job.attempts)
-        job.process = self._submit_local(job)
+        if self.scheduler_backend is not None:
+            self._submit_with_scheduler(job)
+        else:
+            job.process = self._submit_local(job)
         job.status = "submitted"
         return job
+
+    def _submit_with_scheduler(self, job: CP2KSubmittedJob) -> None:
+        if self.scheduler_backend is None:
+            raise RuntimeError(f"No scheduler backend configured for mode {job.mode!r}.")
+        request = self.dft_backend.execution_request(job.input_file, output_file=job.output_file)
+        resources = {"directives": self.config.get("cp2k", {}).get("slurm_directives", "")}
+        request = type(request)(
+            command=request.command,
+            work_dir=request.work_dir,
+            stdout_path=request.stdout_path,
+            stderr_path=request.stderr_path,
+            environment=request.environment,
+            resources=resources,
+            metadata={**request.metadata, "task_id": job.task_id},
+        )
+        scheduler_job = self.scheduler_backend.submit(request)
+        job.scheduler_job = scheduler_job
+        job.process = scheduler_job.native_handle if isinstance(scheduler_job.native_handle, subprocess.Popen) else None
+        job.job_id = scheduler_job.external_id
+        job.started_at = time.monotonic()
 
     def _timed_out(self, job: CP2KSubmittedJob) -> bool:
         return (

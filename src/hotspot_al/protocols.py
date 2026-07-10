@@ -2,12 +2,9 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-from typing import Any, Protocol
+from typing import Protocol
 
-import numpy as np
-from ase import Atoms
-
+from hotspot_al.backends.base import DFTBackend, MDBackend, MLIPBackend, SchedulerBackend
 from hotspot_al.models import FrameData
 
 
@@ -18,14 +15,7 @@ class FrameSource(Protocol):
         """Return the next available frame or ``None`` when exhausted."""
 
 
-class ForceBackend(Protocol):
-    """Protocol for runtime backends that can evaluate atomic forces."""
+# Backward-compatible name; new code should use MLIPBackend explicitly.
+ForceBackend = MLIPBackend
 
-    def evaluate_forces(
-        self,
-        atoms: Atoms,
-        *,
-        config: dict[str, Any] | None = None,
-        model_path: str | Path | None = None,
-    ) -> np.ndarray:
-        """Return forces with shape ``(n_atoms, 3)``."""
+__all__ = ["DFTBackend", "ForceBackend", "FrameSource", "MDBackend", "MLIPBackend", "SchedulerBackend"]

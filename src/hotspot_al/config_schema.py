@@ -26,10 +26,20 @@ CONFIG_SCHEMA: Schema = {
         "description": str,
     },
     "backend": {
-        "mlip": str,
-        "md_engine": str,
-        "dft_engine": str,
+        "md": {
+            "engine": str,
+        },
+        "mlip": {
+            "engine": str,
+        },
+        "dft": {
+            "engine": str,
+        },
+        "scheduler": {
+            "engine": str,
+        },
     },
+    "plugins": dict,
     "lammps": {
         "executable": str,
         "input_template": (str, type(None)),
@@ -195,6 +205,10 @@ CONFIG_SCHEMA: Schema = {
     },
     "model_registry": {
         "root_dir": str,
+    },
+    "datasets": {
+        "labeled_dir": str,
+        "training_dir": str,
     },
     "training_mask": {
         "core": (int, float),

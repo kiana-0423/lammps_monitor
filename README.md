@@ -1,487 +1,409 @@
-# hotspot_al
+# PHAL — Physics-aware Hotspot Active Learning Platform
 
-`hotspot_al` 是一个面向大规模反应型 MLIP-MD 的局域热点主动学习研究原型。当前版本只支持 `Allegro` 作为 MLIP 后端，并围绕 `Allegro + LAMMPS + CP2K` 工作流组织代码。
+`hotspot_al` 是面向大规模反应型 MLIP-MD 的局域热点主动学习平台。PHAL 在逐原子
+尺度检测异常事件，只截取需要高精度标注的局域区域，并生成带区域掩码的数据，避免
+将整帧大体系送入 DFT。
 
-当前项目处于 research prototype / validation-in-progress 阶段：核心 Python 模块可测试、可导入，在线监测、CP2K 标注提交、retraining 触发和模型版本部署的闭环编排已经实现。真实生产运行仍需要用户提供本机或 HPC 环境中的 Allegro、LAMMPS、CP2K 可执行程序、模型文件和训练/导出命令模板。
+PHAL 的领域逻辑与外部科学软件解耦。OOD 检测、热点聚类、block-aware relabeling、
+候选池、数据管理和工作流调度只依赖稳定的 Backend 接口，不直接调用 Allegro、
+LAMMPS、CP2K 或具体队列系统。
 
-方法名暂定为 `PHAL`：
+## 第一原则
 
-`Physics-aware Hotspot Active Learning for Allegro-LAMMPS-CP2K`.
+**Physics-aware Active Learning 是 PHAL 唯一的核心业务逻辑。**
 
-它不是 DP-GEN 的简单包装，而是一个 atom-resolved, physics-aware, event-triggered, hotspot-localized active learning 框架。
+CP2K、LAMMPS、Allegro 及任何未来计算软件都属于 Infrastructure：它们可以替换、
+迁移或扩展，但不能决定算法层的模型、模块边界和演进方向。架构决策必须优先保护
+Core Domain 的稳定性和可测试性。
 
-## 方法定位
+具体约束如下：
 
-标准 DP-GEN 更偏向：
+- Core Domain 不导入任何具体 MLIP、MD、DFT、调度器或进程启动实现；
+- 算法输入输出使用 `FrameData`、`OODFrameResult`、`ExtractedRegion`、`EventRecord`
+  等领域模型；
+- Application/Workflow 层只能通过 Backend Interface 请求外部能力；
+- Infrastructure 负责软件输入、执行、解析、运行状态、日志和错误翻译；
+- 新增或替换计算软件不得要求修改 OOD、热点检测、区域截取、候选选择和数据语义；
+- 依赖边界由 `tests/architecture/test_core_domain_boundaries.py` 自动检查。
 
-- committee-based force deviation；
-- frame-level candidate selection；
-- 整帧进入标注流程；
-- 与 DeepMD 生态强耦合。
+这里的“无外部依赖”是指不依赖具体科学软件和运行环境。NumPy、ASE 等通用数值与
+原子数据基础属于受控技术依赖，不携带某个计算后端的业务语义。
 
-本项目当前聚焦于：
+> 当前状态：research prototype / validation in progress。核心离线流程、Backend
+> 插件架构和 fake-backend 端到端测试可用；生产运行仍需要用户提供模型、科学软件、
+> 站点资源参数及训练/导出命令，并完成对应体系的科学验证。
 
-- `Allegro` 单后端主动学习协议；
-- `LAMMPS` MD 输入与 dump 读取接口；
-- `CP2K` DFT 输入生成与 force parser；
-- atom-wise OOD monitoring；
-- LJ projection residual 等 physics-aware 指标；
-- event-triggered pre/trigger/post frame extraction；
-- hotspot-localized cluster/slab/graph extraction；
-- H capping / frozen boundary / embedding hook；
-- core-region masked force retraining；
-- 避免对大规模 MD 整帧做 DFT 标注。
+## 核心能力
 
-如果 DP-GEN 回答的是“哪一帧不确定”，PHAL 进一步回答“哪一个原子异常、异常为什么发生、应该截取哪一块区域、哪些原子真正进入监督损失”。
+- 逐原子 OOD 监测：force、force burst、displacement、最近邻距离、配位变化、
+  LJ projection residual、committee deviation 和 MLIP force deviation；
+- `light` / `physics` / `full` 分阶段评分，减少昂贵指标的调用频率；
+- event-triggered pre/trigger/post frame 缓存；
+- cluster、slab、graph、block 四种局域区域截取方式；
+- block 空间网格、相邻异常块合并、halo、cooldown 和 frozen boundary；
+- 保守式 H capping、边界区域标记及 point-charge embedding 接口；
+- `extxyz + npz + metadata` 数据输出和逐原子训练权重；
+- 样本数、时间间隔或手动触发的重训练流程；
+- 模型注册、部署、热加载和回滚；
+- 配置驱动的 Backend 工厂、注册表及 Python entry-point 插件发现；
+- Local、Slurm、PBS 调度适配器和统一任务状态模型。
 
-## 工作流
-
-```text
-Large-scale Allegro-LAMMPS MLIP-MD
-        ↓
-Atom-wise real-time / offline OOD monitoring
-        ↓
-Event-triggered frame extraction
-        ↓
-Hotspot atom clustering
-        ↓
-Local cluster / slab / graph extraction
-        ↓
-Boundary treatment / H capping / embedding hook
-        ↓
-CP2K DFT labeling
-        ↓
-Masked training data generation
-        ↓
-Allegro retraining
-        ↓
-Updated Allegro-LAMMPS simulation
-```
+## 平台架构
 
 ```mermaid
 flowchart TD
-    A[Allegro-LAMMPS MD] --> B[OnlineMonitor]
-    B --> C[Atom-wise OOD scores]
-    C --> D[Rolling event buffer]
-    D --> E[Hotspot extraction]
-    E --> E1{extraction.mode?}
-    E1 -->|cluster/slab/graph| E2[H capping + boundary]
-    E1 -->|block| E3[Block core + halo + frozen boundary + cooldown]
-    E2 --> F[CP2KTaskSubmitter]
-    E3 --> F
-    F --> G[Masked extxyz dataset]
-    G --> H[RetrainTrigger]
-    H --> I[ModelRegistry]
-    I --> J[Deployed Allegro model paths]
+    MD[MD Backend] --> F[FrameData]
+    F --> O[OOD Detectors]
+    O --> B[Rolling Event Buffer]
+    B --> H[Hotspot Detection]
+    H --> X[Region Extraction]
+    X --> D[DFT Backend]
+    D --> S[Scheduler Backend]
+    S --> DS[Dataset Management]
+    DS --> R[MLIP Backend: train/export]
+    R --> M[Model Registry]
+    M --> MD
 ```
 
-```mermaid
-sequenceDiagram
-    participant L as LAMMPSController
-    participant M as OnlineMonitor
-    participant S as OnlineEventScheduler
-    participant C as CP2KTaskSubmitter
-    L->>M: FrameData
-    M->>M: full/light OOD scoring
-    M->>S: EventRecord
-    S->>C: ScheduledTask
-    C->>C: extract region + H caps + CP2K input
-```
-
-## 当前实现范围
-
-已经实现的最小可验证模块：
-
-- LAMMPS custom dump 读取，统一输出 `FrameData`；
-- 逐原子监测：`force`、`delta_force`、`displacement`、`r_min`、`coordination`、`delta_q`；
-- staged OOD scoring：`light` / `physics` / `full`；
-- rolling buffer 与事件元数据；
-- hotspot 检测与空间聚类；
-- cluster / slab / graph / block 四种局域截取 baseline；
-- block 模式：固定空间网格切分、异常 block 合并、cooldown 去重、frozen boundary，适合大规模周期体系；
-- 保守式 H capping；
-- CP2K H-only optimization 与 single-point input 生成；
-- CP2K force parser；
-- 通用 `extxyz + npz + metadata` 数据输出；
-- Allegro extxyz + per-atom mask 导出；
-- Allegro runner：可注入单模型 force evaluator，也可通过 `AllegroRunner.from_config(config)` 自动连接 `AllegroInference`，并支持 train/export command template；
-- 在线 `LAMMPSController`、`OnlineMonitor`、`OnlineEventScheduler`；
-- `CP2KTaskSubmitter`：dry-run / local / Slurm 提交模式与完成后训练样本写入；
-- `RetrainTrigger`：按样本数、时间或手动触发 Allegro 训练/导出；
-- `ModelRegistry`：模型版本记录、部署路径更新和回滚；
-- 完整 LAMMPS input/data 生成辅助函数；
-- 配置 schema 校验与项目异常基类；
-- 轻量 candidate pool 与几何去重接口。
-
-当前仍保留为接口、骨架或外部适配部分：
-
-- 真实 Allegro/NequIP 模型文件、部署格式和站点 runtime 环境；
-- LAMMPS / CP2K 真实可执行程序、HPC 队列策略和站点环境配置；
-- point-charge embedding 的动态电荷计算（当前仅支持配置文件静态电荷）；
-- Allegro 训练代码中的 mask-aware loss 深度集成；
-- 生产级候选池排序和多轮主动学习策略。
-
-## 目录结构
+核心依赖方向为：
 
 ```text
-project/
-  README.md
-  pyproject.toml
-  requirements.txt
-  config/
-    default.yaml
-  src/hotspot_al/
-    io/
-    lammps/
-    monitor/
-    buffer/
-    hotspot/
-    extraction/
-    cp2k/
-    training/
-    active_learning/
-    utils/
-  tests/
-  examples/
+detectors / datasets / active-learning policy
+                    ↓
+                workflows
+                    ↓
+     MLIP / MD / DFT / Scheduler interfaces
+                    ↓
+         built-in or external plugins
 ```
 
-当前仓库实际只提供 `config/default.yaml`。如果后续需要按后端拆分配置，可以扩展出 `config/allegro.yaml`、`config/cp2k.yaml`、`config/lammps.yaml`，但它们不是当前版本已包含的文件。
+统一接口定义在
+[`src/hotspot_al/backends/base.py`](src/hotspot_al/backends/base.py)：
 
-## 核心数据结构
+- `MLIPBackend`：单模型推理、committee、训练、导出和模型热加载；
+- `MDBackend`：MD 执行请求与轨迹读取；
+- `DFTBackend`：输入生成、执行请求、完成状态检查和结果解析；
+- `SchedulerBackend`：任务提交、轮询和取消；
+- `ExecutionRequest`：在科学后端与 Local/Slurm/PBS 之间传递命令和资源需求。
 
-`FrameData`
+更完整的依赖规则和插件规范见
+[`docs/architecture.md`](docs/architecture.md)。
 
-- `atoms: ase.Atoms`
-- `step: int`
-- `time: float | None`
-- `forces: np.ndarray | None`
-- `velocities: np.ndarray | None`
-- `energy: float | None`
-- `metadata: dict`
+## 当前内置后端
 
-`ExtractedRegion`
+| 角色 | 内置实现 | 当前范围 |
+| --- | --- | --- |
+| MLIP | Allegro | 推理适配、committee、外部训练/导出命令模板 |
+| MD | LAMMPS | 命令生成、input/data 辅助、custom dump 读取、在线 controller |
+| DFT | CP2K | cluster 输入生成、force parser、任务准备与结果写入 |
+| Scheduler | Local / Slurm / PBS | 统一提交、状态轮询和取消接口 |
 
-- `atoms`
-- `original_indices`
-- `core_indices`
-- `inner_buffer_indices`
-- `outer_buffer_indices`
-- `boundary_indices`
-- `h_cap_indices`
-- `hotspot_indices`
-- `region_labels`
-- `mask_weights`
-- `metadata`
+MACE、NequIP、DeepMD、CHGNet、SevenNet、VASP、Quantum ESPRESSO、ORCA、
+OpenMM 和 Kubernetes 目前不是内置实现；它们应作为独立 Backend 插件接入，而不修改
+主动学习核心。
 
-block 模式下 `ExtractedRegion.metadata` 额外包含：
+## 快速开始
 
-- `extraction_mode: "block"`
-- `block_ids`
-- `atom_role`: `label_core` / `inner_buffer` / `outer_buffer` / `frozen_boundary`
-- `cooldown_steps`
-- `h_cap_enabled: false`
-
-## 安装
-
-如果已经在目标 conda 环境中配置好 Python、PyTorch/CUDA、Allegro/NequIP、
-LAMMPS + Allegro `pair_allegro` 和 CP2K，可以用 runtime doctor 检查当前
-环境是否完整：
-
-```bash
-python scripts/check_runtime.py doctor --write-config
-```
-
-如果 `lmp_allegro` 或 `cp2k.popt` 不在 `PATH` 中，可以显式传入：
-
-```bash
-LAMMPS_BIN=/path/to/lmp_allegro CP2K_BIN=/path/to/cp2k.popt python scripts/check_runtime.py doctor --write-config
-```
-
-runtime doctor 会检查：
-
-- `lmp_allegro` / `lmp` / `lammps`，也可用 `LAMMPS_BIN=/path/to/lmp_allegro` 指定；
-- `cp2k.popt` / `cp2k.psmp` / `cp2k`，也可用 `CP2K_BIN=/path/to/cp2k.popt` 指定；
-- `torch`、`nequip`、`allegro`、`ase` 是否可导入；
-- PyTorch CUDA 是否可用。
-
-加上 `--write-config` 后会生成 `config/runtime.local.yaml`，其中写入探测到的
-LAMMPS 和 CP2K 可执行文件路径。正式运行时可把它作为覆盖配置传给
-`load_config("config/runtime.local.yaml")`，或者在自己的配置文件里手动复制：
-
-```yaml
-lammps:
-  executable: /path/to/lmp_allegro
-
-cp2k:
-  executable: /path/to/cp2k.popt
-```
-
-如果希望缺少任一运行时组件时直接失败，可以使用：
-
-```bash
-python scripts/check_runtime.py doctor --strict
-```
-
-推荐用 editable install，确保普通 Python 进程无需设置 `PYTHONPATH` 就能导入包：
+需要 Python 3.10 或更高版本。
 
 ```bash
 python -m venv .venv
 source .venv/bin/activate
-pip install -U pip
-pip install -e ".[dev]"
+python -m pip install -U pip
+python -m pip install -e ".[dev]"
 python -m pytest -q
 ```
 
 基础运行安装：
 
 ```bash
-pip install -e .
+python -m pip install -e .
 ```
 
-可视化可选依赖：
+可选依赖：
 
 ```bash
-pip install -e ".[viz]"
+python -m pip install -e ".[inference]"  # Torch / NequIP 推理基础依赖
+python -m pip install -e ".[viz]"        # pandas / matplotlib
+python -m pip install -e ".[io]"         # h5py / tqdm
+python -m pip install -e ".[chem]"       # pymatgen / RDKit
+python -m pip install -e ".[docs]"       # MkDocs 文档
 ```
 
-真实在线 Allegro 推理可选依赖：
-
-```bash
-pip install -e ".[inference]"
-```
-
-如果只想安装基础运行依赖而不安装本地包：
-
-```bash
-pip install -r requirements.txt
-```
-
-正式使用本仓库源码时仍建议执行 `pip install -e .`，而不是依赖 `PYTHONPATH=src`。
-
-## 文档与容器
-
-API 文档使用 MkDocs / mkdocstrings：
-
-```bash
-pip install -e ".[docs]"
-mkdocs serve
-```
-
-基础 CPU-only 容器定义不包含 Torch/CUDA、LAMMPS、CP2K 或 Allegro runtime：
-
-```bash
-docker build -t hotspot-al .
-docker run --rm hotspot-al
-```
-
-HPC 环境可参考 [container/apptainer.def](container/apptainer.def) 构建 Apptainer 镜像。
+`[inference]` 只提供 Python 推理基础依赖。真实 Allegro、CUDA、模型部署格式以及
+LAMMPS `pair_allegro` 仍应按照目标机器或容器环境单独安装和验证。
 
 ## 配置
 
-主配置在 [config/default.yaml](config/default.yaml)。
+默认配置位于 [`config/default.yaml`](config/default.yaml)，加载时会执行严格 schema
+校验。站点配置应通过覆盖文件提供：
 
-其中包括：
+```python
+from hotspot_al import load_config
 
-- `backend`：Allegro / LAMMPS / CP2K 总体后端；
-- `lammps`：dump 字段、type map、timestep；
-- `allegro`：模型路径、deployed model 路径、committee 模式；
-- `allegro.dataset_dir` / `train_output_dir` / `checkpoint_path`：runner skeleton 使用的外部训练与导出路径；
-- `allegro.train_command_template` / `export_command_template`：外部 Allegro runtime 命令模板；
-- `monitor` / `ood_score`：三阶段触发参数；
-- `buffer` / `hotspot`：事件缓存和聚类半径；
-- `extraction`：cluster/slab/graph/block 截取参数；
-- `h_capping`：保守式补氢策略；
-- `cp2k`：functional、basis、cutoff、SCF、H-only optimization、submit mode、walltime；
-- `retraining` / `model_registry`：自动重训练触发和模型版本目录；
-- `logging`：日志级别和可选文件输出；
-- `training_mask`：core 或 label_core、buffer、boundary 或 frozen_boundary、H-cap 权重；
-- `candidate_pool`：去重与每轮上限。
-
-## 最小示例
-
-- `examples/01_monitor_lammps_dump.py`
-- `examples/02_extract_hotspots.py`
-- `examples/03_generate_cp2k_inputs.py`
-- `examples/04_parse_cp2k_forces.py`
-- `examples/05_write_allegro_dataset.py`
-- `examples/06_online_monitor.py`
-
-这些示例展示的是模块连接方式。示例中的 `dump.lammpstrj`、`trajectory.extxyz` 等输入文件需要用户替换为自己的数据路径，例如 `./data/trajectory.extxyz`。`examples/06_online_monitor.py` 默认使用 fake Allegro 和 CP2K dry-run；设置真实模型、LAMMPS/CP2K 可执行程序和命令模板后可作为在线流程入口。
-
-## 测试覆盖
-
-当前测试包括：
-
-- `test_lammps_reader.py`
-- `test_hotspot_detection.py`
-- `test_cluster_extraction.py`
-- `test_h_capping.py`
-- `test_cp2k_parser.py`
-- `test_mask_generator.py`
-- `test_allegro_adapter.py`
-
-真实环境验证进度：
-
-- Level 1: Allegro/NequIP Python runtime smoke test —— 已通过
-- Level 2: H2O structure construction smoke test —— 已通过
-- Level 2B: tiny H/O toy model inference smoke test —— 已通过
-
-当前已验证的 Allegro/NequIP Python 层状态：
-
-- conda 环境：`allegro-mac`
-- Python：`/opt/miniconda3/envs/allegro-mac/bin/python`，版本 `3.11.15`
-- `torch`：`2.12.0`，可导入
-- `nequip`：`0.18.0`，可导入
-- `allegro`：`0.8.2`，可导入
-- `ase`：`3.28.0`，可导入
-- CPU：可用
-- MPS：当前不可用，但不视为失败
-- tiny H2O synthetic dataset：`tests/fixtures/allegro/tiny_h2o_synthetic.extxyz`
-- tiny H/O model：`tests/fixtures/models/tiny_h2o_allegro_model.pth`
-- H2O inference：已成功输出 total energy 和 shape 为 `(3, 3)` 的 forces
-
-Allegro/NequIP 真实环境 smoke test 进入环境：
-
-```bash
-source "$(conda info --base)/etc/profile.d/conda.sh"
-conda activate allegro-mac
+config = load_config("config/runtime.local.yaml")
 ```
 
-Stage 1：Allegro runtime smoke test：
+Backend 选择采用嵌套结构：
+
+```yaml
+backend:
+  md:
+    engine: lammps
+  mlip:
+    engine: allegro
+  dft:
+    engine: cp2k
+  scheduler:
+    engine: slurm
+
+lammps:
+  executable: /opt/lammps/bin/lmp_allegro
+
+cp2k:
+  executable: /opt/cp2k/bin/cp2k.psmp
+  submit_mode: slurm
+
+allegro:
+  device: cuda
+  deployed_model_paths:
+    - /workspace/models/allegro-deployed.pth
+  train_command_template: >-
+    allegro-train {train_config_path}
+    --dataset {dataset_dir}
+    --output {output_dir}
+  export_command_template: >-
+    allegro-deploy build
+    --checkpoint {checkpoint_path}
+    --output {output_dir}
+
+datasets:
+  labeled_dir: /workspace/data/labeled
+  training_dir: /workspace/data/training
+```
+
+所有外部程序路径和命令模板都应来自 YAML，不应写入检测器、数据模块或工作流代码。
+
+旧版 `backend.mlip`、`backend.md_engine`、`backend.dft_engine` 配置在加载时会自动
+转换为新结构，但新配置应直接使用嵌套格式。
+
+## Backend 插件
+
+第三方包可以通过 entry point 注册 Backend，无需修改 PHAL：
+
+```toml
+[project.entry-points."hotspot_al.backends"]
+"mlip:mace" = "phal_mace.backend:MACEBackend"
+"dft:vasp" = "phal_vasp.backend:VASPBackend"
+```
+
+插件类应继承对应接口并实现 `from_config()` 与 `check_runtime()`。插件专属配置放在
+自由命名空间 `plugins` 下：
+
+```yaml
+backend:
+  mlip:
+    engine: mace
+
+plugins:
+  mace:
+    model_paths:
+      - /workspace/models/mace.model
+    device: cuda
+```
+
+也可以为站点本地集成使用独立注册表：
+
+```python
+from hotspot_al.backends import BackendRegistry
+
+registry = BackendRegistry()
+registry.register("mlip", "site_mlip", SiteMLIPBackend.from_config)
+backend = registry.create("mlip", "site_mlip", config)
+```
+
+## 在线监测
+
+新的组合入口注入 `MLIPBackend`，而不是在监测器内部选择 Allegro：
+
+```python
+from hotspot_al.backends import BackendRole, MLIPBackend, create_typed_backend
+from hotspot_al.monitor.online_monitor import OnlineMonitor
+
+mlip = create_typed_backend(config, BackendRole.MLIP, MLIPBackend)
+monitor = OnlineMonitor(
+    config=config,
+    mlip_backend=mlip,
+    frame_source=frame_source,
+    scheduler=event_scheduler,
+)
+results = monitor.run()
+```
+
+旧的 `runner=AllegroRunner(...)` 注入方式暂时保留为兼容边界，新代码应使用
+`mlip_backend=`。
+
+可直接运行不依赖外部软件的示例：
+
+```bash
+python examples/06_online_monitor.py
+```
+
+该示例使用 fake force evaluator 和 CP2K dry-run。真实在线运行需要配置模型、MD frame
+source、DFT Backend 和 Scheduler Backend。
+
+## Runtime 检查
+
+当前 runtime doctor 面向内置 Allegro/LAMMPS/CP2K 参考环境：
+
+```bash
+python scripts/check_runtime.py doctor
+python scripts/check_runtime.py doctor --strict
+python scripts/check_runtime.py doctor --write-config
+```
+
+如果程序不在 `PATH` 中，可以临时指定：
+
+```bash
+LAMMPS_BIN=/opt/lammps/bin/lmp_allegro \
+CP2K_BIN=/opt/cp2k/bin/cp2k.psmp \
+python scripts/check_runtime.py doctor --write-config
+```
+
+每个 Backend 也提供 `check_runtime()`；未来插件应通过该接口报告自身依赖，而不是把
+软件名称继续加入核心 doctor。
+
+## 数据与区域掩码
+
+核心数据结构包括：
+
+- `FrameData`：ASE `Atoms`、step、time、forces、velocities、energy 和 metadata；
+- `OODFrameResult`：逐原子分数、热点索引、触发原因和评分阶段；
+- `ExtractedRegion`：原子区域、原始索引、core/buffer/boundary/H-cap 索引和 mask；
+- `EventRecord`：触发前后帧、热点原子、分数、模型版本和数据血缘信息。
+
+默认数据输出包含：
+
+- `forces`；
+- `mask_weights`；
+- `region_code`；
+- 原始帧、热点和边界角色 metadata。
+
+训练后端必须显式消费 `mask_weights`。不得把 masked atoms 的力简单改成零后使用普通
+force loss，因为这会改变监督目标。
+
+block 模式的典型角色为：
+
+```text
+label_core → inner_buffer → outer_buffer → frozen_boundary
+```
+
+各区域的训练权重由 `training_mask` 配置控制。
+
+## 目录结构
+
+```text
+src/hotspot_al/
+├── backends/          # 契约、注册表、工厂和内置适配器
+├── detectors/         # OOD / hotspot 检测公共入口
+├── workflows/         # 后端无关的流程组合
+├── schedulers/        # 调度器公共入口
+├── runtime/           # 执行请求、任务状态、runtime 状态
+├── datasets/          # 后端无关的数据管理入口
+├── active_learning/   # 候选池、去重和事件调度
+├── monitor/           # 逐原子物理指标与在线监测
+├── extraction/        # cluster/slab/graph/block 截取
+├── buffer/            # rolling event buffer
+├── hotspot/           # hotspot 聚类
+├── training/          # mask、重训练触发和模型注册
+├── lammps/            # LAMMPS 兼容实现细节
+├── cp2k/              # CP2K 兼容实现细节
+├── io/                # 轨迹与数据读写
+└── utils/
+```
+
+顶层 `detectors`、`datasets`、`runtime`、`schedulers` 和 `workflows` 是平台稳定入口；
+具体软件实现应留在 Backend 或兼容适配层中。
+
+## 容器与 HPC
+
+仓库当前提供用于开发和测试的 CPU-only 容器：
+
+```bash
+docker build -t phal-dev .
+docker run --rm phal-dev
+```
+
+该镜像不包含 CUDA、Allegro、带 MLIP pair style 的 LAMMPS 或 CP2K。HPC 环境可参考
+[`container/apptainer.def`](container/apptainer.def) 构建 Apptainer 镜像。
+
+生产环境建议：
+
+- 使用 OCI/Docker 作为可复现构建源，Apptainer/SIF 用于 HPC 运行；
+- 分离 MLIP-MD、DFT labeling 和 training 镜像；
+- 模型、轨迹、标注数据和注册表通过只读/可写 volume 挂载；
+- GPU 驱动由宿主机提供，CUDA/PyTorch/MLIP runtime 固定在镜像中；
+- MPI 镜像必须与目标集群 ABI 和启动方式一起验证。
+
+## 测试
+
+运行全部离线测试：
+
+```bash
+python -m pytest -q
+python -m mypy src/hotspot_al
+python tests/scripts/check_imports.py
+```
+
+真实外部程序集成测试默认跳过，需要显式启用：
+
+```bash
+RUN_EXTERNAL=1 python -m pytest tests/integration -q
+```
+
+相关 smoke test：
 
 ```bash
 python scripts/smoke_allegro.py
-RUN_EXTERNAL=1 ALLEGRO_SMOKE_DEVICE=cpu pytest tests/integration/test_allegro_real.py -q
-RUN_EXTERNAL=1 ALLEGRO_SMOKE_DEVICE=auto pytest tests/integration/test_allegro_real.py -q
-RUN_EXTERNAL=1 ALLEGRO_SMOKE_DEVICE=mps pytest tests/integration/test_allegro_real.py -q
-```
-
-Stage 2：H2O 模型推理 smoke test：
-
-```bash
-RUN_EXTERNAL=1 pytest tests/integration/test_allegro_h2o_inference_real.py -q
-
-python scripts/make_tiny_h2o_dataset.py
-python scripts/train_tiny_allegro_h2o.py
-
-RUN_EXTERNAL=1 \
-ALLEGRO_SMOKE_DEVICE=cpu \
-ALLEGRO_MODEL_PATH=tests/fixtures/models/tiny_h2o_allegro_model.pth \
-ALLEGRO_INFERENCE_REQUIRED=1 \
-pytest tests/integration/test_allegro_h2o_inference_real.py -q
-
-ALLEGRO_SMOKE_DEVICE=cpu \
-ALLEGRO_MODEL_PATH=tests/fixtures/models/tiny_h2o_allegro_model.pth \
-ALLEGRO_INFERENCE_REQUIRED=1 \
 python scripts/smoke_allegro_h2o_inference.py
 ```
 
-H2O inference smoke test 要求模型支持 H 和 O 元素。如果模型不支持 H/O，
-失败原因是模型元素类型不匹配，不代表 Allegro/NequIP 环境不可用。Mac
-上默认使用 CPU，MPS 只作为实验性检查，CUDA 不属于 Mac smoke test 范围。
-LAMMPS + Allegro `pair_allegro` 联动测试和 CP2K 测试属于下一阶段，不在
-本次范围内。
+fake-backend 测试验证接口和编排，不代表真实模型、DFT 参数、MPI、GPU 或队列环境已经
+获得科学或生产验证。
 
-`scripts/make_tiny_h2o_dataset.py` 生成的 H2O-like 数据集使用 toy/synthetic
-势能函数写入 energy/forces，不是 DFT 数据。`scripts/train_tiny_allegro_h2o.py`
-生成的 tiny H/O 模型只用于 smoke test；如果当前 Allegro 训练配置/API 不稳定，
-该脚本使用 NequIP 最小模型作为 fallback 来验证 NequIP/Allegro runtime 的模型
-加载与 inference 链路。该模型没有物理意义，不能用于科研结论。
+## 当前边界
 
-最近一次 Level 2B 直接推理输出摘要：
+- 内置生产参考链仍主要是 Allegro + LAMMPS + CP2K；其他软件需要插件实现；
+- CP2K H-only optimization 与 single-point 输入均可生成，但自动优化后坐标传递到
+  single-point 的完整执行链尚未实现；
+- point-charge embedding 当前主要支持静态配置，缺少动态电荷后端；
+- mask-aware loss 已有数据与损失接口，但仍需在具体 MLIP 训练后端中深度集成；
+- Kubernetes Scheduler、跨节点服务编排和生产级可观测性仍属于长期规划；
+- 真实 LAMMPS/CP2K/MLIP 集成测试依赖外部环境，默认 CI 只运行离线测试；
+- 数据血缘、断点恢复和多轮策略已有基础数据结构，但仍需生产化强化。
 
-```text
-model supported symbols metadata: ['H', 'O']
-water total energy: -0.017012965336119387
-water forces shape: (3, 3)
-device: cpu
-inference status: ok
+## 文档与示例
+
+- [架构设计](docs/architecture.md)
+- [配置参考](docs/config-reference.md)
+- [在线模式](docs/online-mode.md)
+- [性能说明](docs/performance.md)
+- [API 文档](docs/api.md)
+- [`examples/`](examples/)
+
+本地启动文档：
+
+```bash
+python -m pip install -e ".[docs]"
+mkdocs serve
 ```
-
-下一阶段可以进入 LAMMPS + Allegro `pair_allegro` 联动 smoke test；该阶段需要
-单独验证 LAMMPS、`pair_allegro` 插件和模型部署格式，不属于当前 Python runtime
-smoke test 范围。
-
-## Allegro 数据输出说明
-
-当前实现导出 `extxyz`，包含：
-
-- `forces`
-- `mask_weights`
-- `region_code`
-
-如果 Allegro 训练脚本支持 per-atom weights，可直接接入；否则需要在 dataloader / loss 中显式使用 `mask_weights`。项目默认不允许把 masked atoms 的力简单设成 0 再走普通 loss。
-
-## Allegro 接口骨架
-
-当前提供了一个封装 [src/hotspot_al/training/allegro_runner.py](src/hotspot_al/training/allegro_runner.py)，目标是把仓库内部协议和外部 Allegro 运行时解耦：
-
-- `AllegroBackend.evaluate_forces(...)`：通过 `AllegroRunner(force_evaluator=...)` 注入真实单模型推理回调；
-- `AllegroRunner.from_config(config)`：读取 `allegro.deployed_model_paths` / `model_paths`，自动创建 `AllegroInference`；
-- `AllegroBackend.evaluate_committee(...)`：对多个 model path 逐个调用 evaluator，返回形状 `(n_models, n_atoms, 3)`；
-- `AllegroBackend.train(...)`：读取 `allegro.dataset_dir`、`allegro.train_output_dir` 和 `allegro.train_command_template`，默认以 dry-run 方式返回外部训练命令；
-- `AllegroBackend.export_model(...)`：读取 `allegro.checkpoint_path` 和 `allegro.export_command_template`，默认以 dry-run 方式返回外部导出命令。
-
-如果没有注入 `force_evaluator`，也没有使用 `AllegroRunner.from_config(config)`，调用 `AllegroRunner.evaluate_forces(...)` 或依赖它的 committee 评估会抛出 `NotImplementedError`。这是预期的接口边界，不是安装错误。
-
-命令模板使用 Python `str.format(...)` 占位符：
-
-- `train_command_template` 可用 `{dataset_dir}`、`{output_dir}`、`{train_config_path}`；
-- `export_command_template` 可用 `{checkpoint_path}`、`{output_dir}`。
-
-最小 mock evaluator 接法示意：
-
-```python
-import numpy as np
-
-from hotspot_al.lammps.allegro_lammps import AllegroBackend
-from hotspot_al.training.allegro_runner import AllegroRunner
-
-
-def my_force_evaluator(atoms, model_path, config):
-    # Replace this with a real Allegro inference call.
-    return np.zeros((len(atoms), 3))
-
-
-backend = AllegroBackend(
-    config=config,
-    runner=AllegroRunner(force_evaluator=my_force_evaluator),
-)
-```
-
-真实 Allegro/NequIP 推理入口：
-
-```python
-from hotspot_al.training import AllegroRunner
-
-runner = AllegroRunner.from_config(config)
-forces = runner.evaluate_forces(atoms, config=config)
-```
-
-需要用户提供或适配的外部组件：
-
-- Allegro 单模型推理函数，签名兼容 `force_evaluator(atoms, model_path, config)`；
-- Allegro train/export 命令模板，写入 `allegro.train_command_template` 和 `allegro.export_command_template`；
-- LAMMPS / CP2K 可执行文件、输入模板、作业提交、重试和失败恢复逻辑；
-- 如果要做真实 masked retraining，需要在外部 Allegro dataloader / loss 中消费 `mask_weights`。
-
-## 局限性
-
-- 当前版本是 research prototype / validation-in-progress，不是完整生产平台。
-- Allegro backend 现在提供了薄 runner 骨架，但默认仍未绑定真实训练与推理运行时。
-- LAMMPS 和 CP2K runner 目前主要是命令构建与输入准备层，还没有完整 HPC job management。
-- OOD 还缺训练集统计校准、在线 callback 与真实 committee 外部评估。
-- 局域截取和边界化学处理仍是 baseline，实现上偏保守。
-- 数据血缘、模型版本管理、失败恢复和 CLI 操作层还没有系统化。
-- 当前测试主要是单元测试，还缺真实 LAMMPS / CP2K / Allegro integration tests。
 
 ## 目标应用
 
-本项目面向以下类型体系：
+PHAL 主要面向 tribochemistry、摩擦界面反应、氧化物表面反应，以及其他具有局域稀有
+事件的大规模反应型 MLIP-MD 体系。核心目标是在保持数据可追踪和方法可解释的前提下，
+降低高精度标注成本，并允许计算后端随模型生态和 HPC 环境演进。
 
-- tribochemistry
-- 摩擦界面反应
-- 氧化物表面反应
-- 大规模界面与局域热点反应型 MLIP-MD
+## License
 
-核心目标是在这些体系中实现更低成本、更可解释、更贴近真实反应事件的 Allegro 主动学习闭环。
+MIT，见 [`LICENSE`](LICENSE)。

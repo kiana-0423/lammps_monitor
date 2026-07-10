@@ -1,4 +1,4 @@
-"""Online MD monitoring loop that closes LAMMPS, inference, scoring, and events."""
+"""Backend-neutral online MD monitoring, scoring, and event orchestration."""
 
 from __future__ import annotations
 
@@ -11,6 +11,8 @@ import numpy as np
 from ase.io import write
 
 from hotspot_al.active_learning.scheduler import OnlineEventScheduler
+from hotspot_al.backends.base import MLIPBackend
+from hotspot_al.backends.factory import backend_engine, create_mlip_backend
 from hotspot_al.buffer.rolling_buffer import RollingBuffer
 from hotspot_al.exceptions import DataError
 from hotspot_al.models import EventRecord, FrameData, OODFrameResult
@@ -21,7 +23,6 @@ from hotspot_al.monitor.geometry_monitor import displacement_norms, minimum_neig
 from hotspot_al.monitor.neighbor_utils import MonitorNeighbors
 from hotspot_al.monitor.ood_score import OODScorer
 from hotspot_al.protocols import FrameSource
-from hotspot_al.training.allegro_runner import AllegroRunner
 from hotspot_al.utils.geometry import row_norms
 from hotspot_al.utils.logging import configure_logging
 
@@ -36,8 +37,9 @@ class OnlineMonitor:
         self,
         *,
         config: dict[str, Any],
-        runner: AllegroRunner,
         frame_source: FrameSource | Iterable[FrameData],
+        mlip_backend: MLIPBackend | None = None,
+        runner: Any | None = None,
         on_event: EventCallback | None = None,
         scorer: OODScorer | None = None,
         buffer: RollingBuffer | None = None,
@@ -47,7 +49,10 @@ class OnlineMonitor:
     ) -> None:
         self.config = config
         self.logger = configure_logging(config, name=__name__)
-        self.runner = runner
+        if mlip_backend is not None and runner is not None:
+            raise ValueError("Pass mlip_backend or the legacy runner argument, not both.")
+        self.mlip_backend = mlip_backend or create_mlip_backend(config, legacy_runner=runner)
+        self.runner = runner  # compatibility attribute; core logic uses mlip_backend
         self.frame_source = frame_source
         self.scorer = scorer or OODScorer(config)
         buffer_cfg = config.get("buffer", {})
@@ -140,8 +145,8 @@ class OnlineMonitor:
             hotspot_atoms=result.hotspot_indices,
             ood_scores=result.atom_scores,
             trigger_reason=result.trigger_reason,
-            backend=self.config.get("backend", {}).get("mlip"),
-            model_version=self._model_version(),
+            backend=backend_engine(self.config, "mlip"),
+            model_version=self.mlip_backend.model_version(),
             metadata={"ood": result.metadata},
         )
         self._last_event_step = frame.step
@@ -166,7 +171,7 @@ class OnlineMonitor:
         """Compute online metrics and score one frame."""
 
         if frame.forces is None:
-            msg = "Online monitoring requires LAMMPS dump forces fx/fy/fz."
+            msg = "Online monitoring requires force-bearing MD frames."
             raise DataError(msg)
         atoms = frame.atoms
         self._ensure_neighbors(atoms)
@@ -191,12 +196,12 @@ class OnlineMonitor:
         full_frame = frame_index % self.monitor_freq == 0
         if full_frame:
             self.logger.debug("processing full frame step=%s index=%d", frame.step, frame_index)
-            mlip_forces = self.runner.evaluate_forces(atoms, config=self.config, model_path=self._primary_model_path())
+            mlip_forces = self.mlip_backend.evaluate_forces(atoms, model=self._primary_model_path())
             metrics["mlip_force"] = force_norms(mlip_forces)
             metrics["mlip_force_deviation"] = row_norms(np.asarray(frame.forces, dtype=float) - mlip_forces)
             committee_paths = self._committee_model_paths()
             if committee_paths:
-                committee_forces = self.runner.evaluate_committee(atoms, config=self.config, model_paths=committee_paths)
+                committee_forces = self.mlip_backend.evaluate_committee(atoms, models=committee_paths)
                 metrics["committee"] = committee_force_deviation(committee_forces)
             result = self.scorer.score_full(metrics, atoms=atoms, forces=frame.forces)
         else:
@@ -308,19 +313,8 @@ class OnlineMonitor:
             self._neighbors.rebuild(atoms)
 
     def _primary_model_path(self) -> str | Path | None:
-        allegro_cfg = self.config.get("allegro", {})
-        deployed = allegro_cfg.get("deployed_model_paths") or []
-        model_paths = allegro_cfg.get("model_paths") or []
-        if deployed:
-            return deployed[0]
-        if model_paths:
-            return model_paths[0]
-        return allegro_cfg.get("checkpoint_path")
+        model_paths = self.mlip_backend.model_paths()
+        return model_paths[0] if model_paths else None
 
-    def _committee_model_paths(self) -> list[str]:
-        allegro_cfg = self.config.get("allegro", {})
-        return list(allegro_cfg.get("deployed_model_paths") or allegro_cfg.get("model_paths") or [])
-
-    def _model_version(self) -> str | None:
-        path = self._primary_model_path()
-        return None if path is None else Path(path).name
+    def _committee_model_paths(self) -> list[Path]:
+        return list(self.mlip_backend.model_paths())

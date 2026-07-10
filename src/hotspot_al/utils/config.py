@@ -38,5 +38,23 @@ def load_config(path: str | Path | None = None, *, base_path: str | Path | None 
 
     base = load_yaml(base_path or DEFAULT_CONFIG_PATH)
     if path is None:
-        return validate_config(base)
-    return validate_config(merge_dicts(base, load_yaml(path)))
+        return validate_config(_normalize_backend_config(base))
+    return validate_config(_normalize_backend_config(merge_dicts(base, load_yaml(path))))
+
+
+def _normalize_backend_config(config: dict[str, Any]) -> dict[str, Any]:
+    """Normalize pre-platform backend keys before schema validation."""
+
+    normalized = deepcopy(config)
+    backend = normalized.setdefault("backend", {})
+    if not isinstance(backend, dict):
+        return normalized
+    legacy = {
+        "md": backend.pop("md_engine", None),
+        "dft": backend.pop("dft_engine", None),
+    }
+    for role in ("md", "mlip", "dft", "scheduler"):
+        value = legacy.get(role) if legacy.get(role) is not None else backend.get(role)
+        if isinstance(value, str):
+            backend[role] = {"engine": value}
+    return normalized

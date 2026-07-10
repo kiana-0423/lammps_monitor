@@ -1,7 +1,8 @@
 # hotspot_al Docs
 
-`hotspot_al` implements a hotspot-localized active-learning loop for
-Allegro-LAMMPS-CP2K workflows.
+`hotspot_al` is the Physics-aware Hotspot Active Learning Platform (PHAL), with
+backend-neutral domain algorithms and plugin adapters for scientific runtimes.
+Allegro, LAMMPS, and CP2K are the current built-in reference backends.
 
 ## Quick Start
 

@@ -56,7 +56,7 @@ def main() -> int:
             "rmin": minimum_neighbor_distances_fast(frame.atoms, neighbors),
             "delta_q": coordination_deltas(q_values, previous_q),
         }
-        result = scorer.score_light(metrics, metadata={"backend": config["backend"]["mlip"]})
+        result = scorer.score_light(metrics, metadata={"backend": config["backend"]["mlip"]["engine"]})
         print(frame.step, result.stage, result.max_score, result.trigger_reason)
         previous_positions = frame.atoms.get_positions().copy()
         previous_forces = frame.forces.copy()
