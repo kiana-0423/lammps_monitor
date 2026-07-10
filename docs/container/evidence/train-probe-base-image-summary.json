@@ -1,0 +1,11 @@
+{
+  "checked_at_utc": "2026-07-10T12:09:59Z",
+  "image": "nvcr.io/nvidia/pytorch:25.09-py3",
+  "index_digest": "sha256:f3b4a33fd60d5e0358287bb44d57e91eda45e8f1681fef1bfd6c969371417130",
+  "arm64_manifest_digest": "sha256:89172d8ef9c4641aacdcddf02c085bf7a736501b443ce2c4e0a660754f67106b",
+  "arm64_config_digest": "sha256:8cd4d4cfc0ddeecd16cfc416d5cc32984288c356a6b78cb39c54e57e98869e11",
+  "platform": "linux/arm64",
+  "result": "passed",
+  "method": "NGC Registry V2 API",
+  "note": "Docker Buildx is unavailable on the Miyabi login node; the registry manifest and digest were fetched directly using an anonymous read-only token."
+}

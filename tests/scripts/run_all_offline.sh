@@ -3,7 +3,7 @@ set -euo pipefail
 
 python -m compileall -q src tests examples
 python tests/scripts/check_imports.py
-python -m pytest -q tests/unit tests/e2e -m "not integration and not slow"
+python -m pytest -q tests/unit tests/e2e tests/architecture -m "not integration and not slow"
 
 if [[ "${HOTSPOT_AL_CI:-}" == "1" ]]; then
   if [[ -n "${CP2K_BIN:-}" ]]; then

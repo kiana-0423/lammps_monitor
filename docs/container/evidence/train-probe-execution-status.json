@@ -1,0 +1,48 @@
+{
+  "checked_at_utc": "2026-07-10T12:09:59Z",
+  "git_commit": "3333e87dd50607819092c5a6ed23c4bd7986978b",
+  "current_machine": "aarch64",
+  "external_builder": {
+    "docker_available": false,
+    "buildx_available": false,
+    "version": null
+  },
+  "registry_inputs": {
+    "PHAL_REGISTRY_present": false,
+    "PHAL_IMAGE_NAMESPACE_present": false,
+    "PHAL_IMAGE_TAG_present": false,
+    "credentials_present": false
+  },
+  "pbs_inputs": {
+    "queue_configured": false,
+    "project_group_configured": false
+  },
+  "stages": {
+    "base_arm64_manifest": "passed",
+    "oci_build_push": "blocked",
+    "sif_conversion": "blocked",
+    "pbs_gpu_validation": "blocked",
+    "allegro_gpu_inference": "blocked"
+  },
+  "blocking_reasons": [
+    "No Docker or Docker Buildx executable is available on the Miyabi login node.",
+    "No PHAL_REGISTRY or registry credentials were supplied.",
+    "The PBS queue and project group placeholders have not been supplied and cannot be inferred safely."
+  ],
+  "attempts": [
+    {
+      "id": "base-manifest-a1",
+      "change": "initial unauthenticated NGC manifest request",
+      "result": "failed",
+      "failed_stage": "registry-authentication",
+      "reason": "NGC returned HTTP 401 with an anonymous Bearer challenge"
+    },
+    {
+      "id": "base-manifest-a2",
+      "change": "use anonymous read-only Bearer token without changing the candidate",
+      "result": "passed",
+      "failed_stage": null,
+      "reason": null
+    }
+  ]
+}

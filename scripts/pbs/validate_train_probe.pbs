@@ -1,0 +1,55 @@
+#!/bin/bash
+#PBS -q <MIYABI_G_QUEUE>
+#PBS -W group_list=<MIYABI_PROJECT_GROUP>
+#PBS -l select=1
+#PBS -l walltime=00:15:00
+#PBS -j oe
+
+set -euo pipefail
+
+cd "$PBS_O_WORKDIR"
+module purge
+module load apptainer/1.3.5
+
+IMAGE=${PHAL_TRAIN_PROBE_IMAGE:-}
+if [[ -z "${IMAGE}" ]]; then
+    echo "PHAL_TRAIN_PROBE_IMAGE must point to the train-probe SIF" >&2
+    exit 2
+fi
+if [[ ! -f "${IMAGE}" ]]; then
+    echo "train-probe SIF not found: ${IMAGE}" >&2
+    exit 2
+fi
+
+RUNTIME_DIR="$PBS_O_WORKDIR/runtime"
+LOG_DIR="${RUNTIME_DIR}/logs/validation"
+export APPTAINER_TMPDIR="/tmp/${USER}/phal-apptainer-${PBS_JOBID}"
+export APPTAINERENV_PHAL_REQUIRE_CUDA=1
+mkdir -p "${APPTAINER_TMPDIR}" "${LOG_DIR}"
+
+platform_log="${LOG_DIR}/platform-${PBS_JOBID}.json.log"
+train_log="${LOG_DIR}/train-stack-${PBS_JOBID}.json.log"
+platform_rc=0
+train_rc=0
+
+apptainer exec --cleanenv --nv \
+  --bind "$PBS_O_WORKDIR/runtime:/runtime" \
+  "$IMAGE" \
+  python /opt/phal/containers/scripts/validate_platform.py \
+  >"${platform_log}" 2>&1 || platform_rc=$?
+
+apptainer exec --cleanenv --nv \
+  --bind "$PBS_O_WORKDIR/runtime:/runtime" \
+  "$IMAGE" \
+  python /opt/phal/containers/scripts/validate_train_stack.py \
+  >"${train_log}" 2>&1 || train_rc=$?
+
+cat "${platform_log}"
+cat "${train_log}"
+
+if (( platform_rc != 0 || train_rc != 0 )); then
+    echo "train-probe validation failed: platform_rc=${platform_rc}, train_rc=${train_rc}" >&2
+    exit 1
+fi
+
+echo "train-probe validation passed; logs: ${LOG_DIR}"

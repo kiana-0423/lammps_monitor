@@ -1,15 +1,74 @@
-# Central version manifest for every PHAL container image.
-# `null` means deliberately unresolved for Milestone 1, never "latest".
+# Central candidate and validation manifest for PHAL container images.
+# A fixed tag is a candidate input; a digest is required before production promotion.
 schema_version: 1
-infrastructure_revision: "m1"
-image_tag: "m1-scaffold"
+infrastructure_revision: "m2-train-probe"
 
-ubuntu: "24.04"
-cuda: null
-python: null
-torch: null
-nequip: null
-allegro: null
-lammps: null
-cp2k: null
-mpi: null
+platform:
+  os: linux
+  architecture: arm64
+  target_system: miyabi-g
+  cpu: nvidia-grace
+  gpu: gh200
+  scheduler: pbs-professional
+  apptainer: "1.3.5"
+  default_oci_platform: "linux/arm64"
+
+scaffold_defaults:
+  base_image: "ubuntu:24.04"
+  image_tag: "m1-scaffold"
+
+candidates:
+  train_stack_a:
+    image_tag: "m2-train-probe-a"
+    base_image: "nvcr.io/nvidia/pytorch:25.09-py3"
+    base_image_digest: "sha256:89172d8ef9c4641aacdcddf02c085bf7a736501b443ce2c4e0a660754f67106b"
+    inherited:
+      os: "ubuntu:24.04"
+      python: "3.12"
+      cuda: "13.0.1"
+      torch: "2.9.0a0+50eac811a6"
+    explicit:
+      nequip: "0.18.0"
+      allegro_distribution: nequip-allegro
+      allegro: "0.8.3"
+      phal: "0.1.0"
+    status: planned
+    evidence:
+      base_manifest: docs/container/evidence/train-probe-base-image-manifest.json
+      base_manifest_summary: docs/container/evidence/train-probe-base-image-summary.json
+      execution_status: docs/container/evidence/train-probe-execution-status.json
+      build_log: null
+      build_metadata: null
+      oci_manifest: null
+      sif_inspect: null
+      sif_sha256: null
+      pbs_job_id: null
+      platform_log: null
+      train_stack_log: null
+    validation:
+      arm64_manifest: true
+      image_build: false
+      phal_import: false
+      sif_conversion: false
+      miyabi_gpu: false
+      torch_cuda: false
+      allegro_cpu_inference: false
+      allegro_gpu_inference: false
+
+# Reserved locations only. Milestone 2 does not implement these stacks.
+future_stacks:
+  md:
+    base_image: null
+    lammps: null
+    mpi: null
+    status: not_started
+  cp2k:
+    base_image: null
+    cp2k: null
+    mpi: null
+    status: not_started
+
+validated:
+  selected_train_stack: null
+  selected_md_stack: null
+  selected_cp2k_stack: null

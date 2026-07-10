@@ -1,79 +1,67 @@
-# PHAL Container Infrastructure — Milestone 1
+# PHAL Container Infrastructure
 
-This directory is the canonical source for PHAL container images. Milestone 1
-creates the build and filesystem contracts only. No Dockerfile installs Python,
-CUDA, Torch, MLIP software, LAMMPS, CP2K, MPI, or any other package.
+This directory is the canonical source for PHAL OCI images. Dockerfiles remain
+the only image definitions; Apptainer SIF files are deployment artifacts and
+must not be committed.
 
-## Image roles
+## Milestone status
 
-- `Dockerfile.base`: common operating-system foundation;
-- `Dockerfile.md`: future GPU MLIP-MD runtime;
-- `Dockerfile.train`: future GPU model-training runtime;
-- `Dockerfile.cp2k`: future DFT labeling runtime.
+The original `base`, `md`, `train`, and `cp2k` Dockerfiles remain unchanged
+Milestone 1 scaffolds. They do not install scientific software and must not be
+used as production images.
 
-Every Dockerfile receives `BASE_IMAGE` and `IMAGE_TAG` from `build.sh`. The
-script resolves them from `versions.yaml`; Dockerfiles must not use `latest` or
-define independent version pins.
+Milestone 2 adds one deliberately narrow target:
 
-Values set to `null` in `versions.yaml` are deliberately unresolved during
-Milestone 1. Milestone 2 must resolve and validate a compatible version matrix
-before adding installation layers.
+- `Dockerfile.train-probe`: an ARM64 probe of NVIDIA PyTorch, NequIP, Allegro,
+  PHAL, Apptainer `--nv`, and one GH200 GPU.
 
-## Docker, OCI, and Apptainer
+It does not add LAMMPS, CP2K, a production training image, or multi-node MPI.
+The candidate and its validation state are recorded in `versions.yaml`.
 
-Dockerfiles are the only environment definitions:
+## Build and deployment flow
 
 ```text
-versions.yaml
-      ↓
-Dockerfile.*
-      ↓
-Docker/BuildKit image (OCI)
-      ├── registry push / OCI archive
-      └── Apptainer conversion → SIF
+Dockerfile.train-probe + repository root
+                ↓ external Docker Buildx (linux/arm64)
+        registry OCI image
+                ↓ Miyabi Apptainer 1.3.5
+          read-only SIF
+                ↓ PBS job + --nv + /runtime bind
+        GH200 validation results
 ```
 
-Apptainer/Singularity must consume an OCI image produced from these
-Dockerfiles. Do not add an Apptainer `%post` installation script or maintain a
-second dependency definition. A SIF file is a deployment artifact and must
-never be committed.
+The Docker build context is the repository root. The root `.dockerignore`
+excludes mutable runtime data and build artifacts.
 
-## Build interface
-
-Inspect a resolved build without running Docker:
+Inspect the resolved plan without Docker:
 
 ```bash
-containers/build.sh plan base
-containers/build.sh plan md
+containers/build.sh plan train-probe
 ```
 
-Future build/export/conversion entry points are already reserved:
+On an external ARM64-capable Buildx builder:
 
 ```bash
-containers/build.sh build base
-containers/build.sh build-all
-containers/build.sh tag md m1-candidate1
-containers/build.sh oci md
-containers/build.sh sif md
+PHAL_REGISTRY=registry.example \
+  containers/build.sh push train-probe
 ```
 
-`sif` defaults to the explicitly tagged image in the local Docker daemon. CI or
-HPC sites can supply an immutable registry reference:
+To export an OCI archive rather than push:
 
 ```bash
-PHAL_OCI_URI=docker://registry.example/phal/md:m1-candidate1 \
-containers/build.sh sif md
+containers/build.sh oci train-probe
 ```
 
-Paths are derived from the script location. Registry namespaces, version files,
-output directories, and OCI sources can be overridden through the environment;
-no absolute workstation or cluster path is embedded in the build system.
+On Miyabi, a registry URI is mandatory; there is no Docker-daemon fallback:
 
-## Runtime mounts
+```bash
+module load apptainer/1.3.5
+PHAL_OCI_URI=docker://registry.example/phal/train-probe:m2-train-probe-a \
+  containers/build.sh sif train-probe
+```
 
-Images use `/runtime` as the container data root. The host `runtime/` directory
-is mounted there for generated datasets, models, checkpoints, trajectories,
-DFT tasks, logs, and caches. Source code and image layers must not contain these
-artifacts.
+Mutable datasets, models, checkpoints, caches, and logs belong under the host
+`runtime/` tree, mounted as `/runtime`. They are never copied into the image.
 
-See `docs/container/` for the architecture and deployment workflow.
+See `docs/container/milestone2-train-probe.md` for the complete build,
+conversion, PBS submission, acceptance, and troubleshooting procedure.

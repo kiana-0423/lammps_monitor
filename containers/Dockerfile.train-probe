@@ -1,0 +1,66 @@
+# syntax=docker/dockerfile:1
+ARG BASE_IMAGE
+FROM ${BASE_IMAGE}
+
+ARG IMAGE_TAG
+ARG NEQUIP_VERSION
+ARG ALLEGRO_VERSION
+
+LABEL org.opencontainers.image.title="PHAL ARM64 training stack probe" \
+      org.opencontainers.image.description="Milestone 2 probe for the Miyabi-G GH200 training stack" \
+      org.opencontainers.image.version="${IMAGE_TAG}" \
+      org.opencontainers.image.source="containers/Dockerfile.train-probe" \
+      org.phal.versions-file="containers/versions.yaml" \
+      org.phal.stage="train-probe"
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PHAL_HOME=/opt/phal \
+    PHAL_CONFIG_DIR=/opt/phal/configs \
+    PHAL_RUNTIME_DIR=/runtime
+
+RUN test -n "${NEQUIP_VERSION}" \
+    && test -n "${ALLEGRO_VERSION}" \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends \
+        build-essential \
+        ca-certificates \
+        cmake \
+        curl \
+        git \
+        ninja-build \
+        pkg-config \
+    && rm -rf /var/lib/apt/lists/*
+
+# CUDA and Torch are inherited from the NVIDIA PyTorch base image. Installing a
+# second CUDA toolkit or replacing Torch here would invalidate the probe.
+RUN python -m pip install \
+        "nequip==${NEQUIP_VERSION}" \
+        "nequip-allegro==${ALLEGRO_VERSION}"
+
+WORKDIR /opt/phal
+
+# The build context is the repository root. Runtime data is excluded by the
+# root .dockerignore and is supplied later through the /runtime bind mount.
+COPY pyproject.toml README.md LICENSE ./
+COPY src ./src
+COPY config ./config
+COPY configs ./configs
+COPY containers ./containers
+COPY scripts ./scripts
+
+RUN python -m pip install -e . \
+    && mkdir -p \
+        /runtime/models \
+        /runtime/datasets \
+        /runtime/checkpoints \
+        /runtime/logs \
+    && python --version \
+    && python -c "import torch; print(torch.__version__)" \
+    && python -c "import nequip; print(nequip.__version__)" \
+    && python -c "import allegro; print(allegro.__version__)" \
+    && python -c "import hotspot_al; print(hotspot_al.__name__)" \
+    && python -c "from hotspot_al import load_config; load_config()"
+
+CMD ["python", "/opt/phal/containers/scripts/validate_platform.py"]
