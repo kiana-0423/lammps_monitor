@@ -1,0 +1,209 @@
+/home/w34000/.bashrc: line 29: /home/w34000/software/conda/etc/profile.d/conda.sh: No such file or directory
+Loading apptainer/1.3.5
+  Loading requirement: squashfuse/0.5.2 gocryptfs/2.4.0
+job_id=2362773.opbs
+hostname=mg0004
+queue=debug-g
+project=gw34
+image=/work/gw34/w34000/project/lammps_monitor/build/containers/md-probe-m3-md-probe-a-arm64.sif
+apptainer=1.3.5
+start_time=2026-07-11T20:55:43+09:00
+/usr/local/lib/python3.12/dist-packages/torch/cuda/__init__.py:63: FutureWarning: The pynvml package is deprecated. Please install nvidia-ml-py instead. If you did not install pynvml directly, please report this to the maintainers of the package that installed pynvml for you.
+  import pynvml  # type: ignore[import]
+{"capability": [9, 0], "cuda_available": true, "cuda_runtime": "13.0", "device_count": 1, "gpu_name": "NVIDIA GH200 120GB", "machine": "aarch64", "tensor_test": true, "torch": "2.9.0a0+50eac811a6.nv25.09"}
+
+Large-scale Atomic/Molecular Massively Parallel Simulator - 10 Sep 2025
+Git info (HEAD / patch_10Sep2025-modified)
+
+Usage example: /opt/lammps/bin/lmp -var t 300 -echo screen -in in.alloy
+
+List of command-line options supported by this LAMMPS executable:
+
+-echo none/screen/log/both  : echoing of input script (-e)
+-help                       : print this help message (-h)
+-in none/filename           : read input from file or stdin (default) (-i)
+-kokkos on/off ...          : turn KOKKOS mode on or off (-k)
+-log none/filename          : where to send log output (-l)
+-mdi '<mdi flags>'          : pass flags to the MolSSI Driver Interface
+-mpicolor color             : which exe in a multi-exe mpirun cmd (-m)
+-cite                       : select citation reminder style (-c)
+-nocite                     : disable citation reminder (-nc)
+-nonbuf                     : disable screen/logfile buffering (-nb)
+-package style ...          : invoke package command (-pk)
+-partition size1 size2 ...  : assign partition sizes (-p)
+-plog basename              : basename for partition logs (-pl)
+-pscreen basename           : basename for partition screens (-ps)
+-restart2data rfile dfile ... : convert restart to data file (-r2data)
+-restart2dump rfile dgroup dstyle dfile ... 
+                            : convert restart to dump file (-r2dump)
+-restart2info rfile         : print info about restart rfile (-r2info)
+-reorder topology-specs     : processor reordering (-r)
+-screen none/filename       : where to send screen output (-sc)
+-skiprun                    : skip loops in run and minimize (-sr)
+-suffix gpu/intel/kk/opt/omp: style suffix to apply (-sf)
+-var varname value          : set index style variable (-v)
+
+OS: Linux "Ubuntu 24.04.3 LTS" 5.14.0-427.13.1.el9_4.aarch64+64k aarch64
+
+Compiler: GNU C++ 13.3.0 with OpenMP 4.5
+C++ standard: C++17
+Embedded fmt library version: 10.2.0
+Embedded JSON class version: 3.12.0
+
+MPI v3.1: Open MPI v4.1.6, package: Debian OpenMPI, ident: 4.1.6, repo rev: v4.1.6, Sep 30, 2023
+
+Accelerator configuration:
+
+KOKKOS package API: CUDA Serial
+KOKKOS package precision: double
+KOKKOS package view layout: legacy
+Kokkos library version: 4.6.2
+
+FFT information:
+
+FFT precision  = double
+FFT engine  = mpiFFT
+FFT library = KISS
+KOKKOS FFT engine  = mpiFFT
+KOKKOS FFT library = KISS
+
+Active compile time flags:
+
+-DLAMMPS_GZIP
+-DLAMMPS_PNG
+-DLAMMPS_JPEG
+-DLAMMPS_SMALLBIG
+sizeof(smallint): 32-bit
+sizeof(imageint): 32-bit
+sizeof(tagint):   32-bit
+sizeof(bigint):   64-bit
+
+Available compression formats:
+
+Extension: .gz     Command: gzip
+Extension: .bz2    Command: bzip2
+Extension: .xz     Command: xz
+Extension: .lzma   Command: xz
+
+
+Installed packages:
+
+KOKKOS 
+
+List of individual style options included in this LAMMPS executable
+
+* Atom styles:
+
+atomic          atomic/kk       body            charge          charge/kk       
+ellipsoid       hybrid          hybrid/kk       line            sphere          
+sphere/kk       tri             
+
+* Integrate styles:
+
+respa           verlet          verlet/kk       
+
+* Minimize styles:
+
+cg              cg/kk           fire/old        fire            hftn            
+quickmin        sd              
+
+* Pair styles:
+
+born            buck            buck/coul/cut   buck/coul/cut/kk                
+buck/kk         coul/cut        coul/cut/kk     coul/debye      coul/debye/kk   
+coul/dsf        coul/dsf/kk     coul/wolf       coul/wolf/kk    meam/c          
+reax            reax/c          mesont/tpm      hybrid          hybrid/omp      
+hybrid/kk       hybrid/molecular                hybrid/molecular/omp            
+hybrid/overlay  hybrid/overlay/omp              hybrid/overlay/kk               
+hybrid/scaled   hybrid/scaled/omp               lj/cut          lj/cut/coul/cut 
+lj/cut/coul/cut/kk              lj/cut/kk       lj/expand       lj/expand/kk    
+morse           morse/kk        nequip          allegro         allegro/kk      
+soft            soft/kk         table           table/kk        yukawa          
+yukawa/kk       zbl             zbl/kk          zero            
+
+* Bond styles:
+
+hybrid          hybrid/kk       zero            
+
+* Angle styles:
+
+hybrid          hybrid/kk       zero            
+
+* Dihedral styles:
+
+hybrid          hybrid/kk       zero            
+
+* Improper styles:
+
+hybrid          hybrid/kk       zero            
+
+* KSpace styles:
+
+zero            
+
+* Fix styles
+
+adapt           addforce        ave/atom        ave/chunk       ave/correlate   
+ave/grid        ave/histo       ave/histo/weight                ave/time        
+aveforce        balance         box/relax       deform          deform/kk       
+deposit         ave/spatial     ave/spatial/sphere              lb/pc           
+lb/rigid/pc/sphere              reax/c/bonds    reax/c/species  dt/reset        
+dt/reset/kk     efield          efield/kk       enforce2d       enforce2d/kk    
+evaporate       external        gravity         gravity/kk      halt            
+heat            indent          langevin        langevin/kk     lineforce       
+momentum        momentum/kk     move            nph             nph/kk          
+nph/sphere      npt             npt/kk          npt/sphere      nve             
+nve/kk          nve/limit       nve/limit/kk    nve/noforce     nve/sphere      
+nve/sphere/kk   nvt             nvt/kk          nvt/sllod       nvt/sllod/kk    
+nvt/sphere      pair            planeforce      press/berendsen press/langevin  
+print           property/atom   property/atom/kk                recenter        
+recenter/kk     restrain        set             setforce        setforce/kk     
+spring          spring/chunk    spring/self     spring/self/kk  store/force     
+store/state     temp/berendsen  temp/berendsen/kk               temp/rescale    
+temp/rescale/kk thermal/conductivity            vector          viscous         
+viscous/kk      wall/harmonic   wall/lj1043     wall/lj126      wall/lj93       
+wall/lj93/kk    wall/morse      wall/reflect    wall/reflect/kk wall/region     
+wall/region/kk  wall/table      
+
+* Compute styles:
+
+aggregate/atom  angle           angle/local     angmom/chunk    bond            
+bond/local      centro/atom     centroid/stress/atom            chunk/atom      
+chunk/spread/atom               cluster/atom    cna/atom        com             
+com/chunk       coord/atom      coord/atom/kk   count/type      mesont          
+dihedral        dihedral/local  dipole          dipole/chunk    displace/atom   
+erotate/sphere  erotate/sphere/atom             erotate/sphere/kk               
+fragment/atom   global/atom     group/group     gyration        gyration/chunk  
+heat/flux       improper        improper/local  inertia/chunk   ke              
+ke/atom         msd             msd/chunk       omega/chunk     orientorder/atom                
+orientorder/atom/kk             pair            pair/local      pe              
+pe/atom         pressure        property/atom   property/chunk  property/grid   
+property/local  rdf             reduce          reduce/chunk    reduce/region   
+slice           stress/atom     temp            temp/chunk      temp/com        
+temp/deform     temp/deform/kk  temp/kk         temp/partial    temp/profile    
+temp/ramp       temp/region     temp/sphere     torque/chunk    vacf            
+vacf/chunk      vcm/chunk       
+
+* Region styles:
+
+block           block/kk        cone            cylinder        ellipsoid       
+intersect       plane           prism           sphere          sphere/kk       
+union           
+
+* Dump styles:
+
+atom            cfg             custom          atom/mpiio      cfg/mpiio       
+custom/mpiio    xyz/mpiio       grid            grid/vtk        image           
+local           movie           xyz             
+
+* Command styles
+
+angle_write     balance         change_box      create_atoms    create_bonds    
+create_box      delete_atoms    delete_bonds    box             kim_init        
+kim_interactions                kim_param       kim_property    kim_query       
+reset_ids       reset_atom_ids  reset_mol_ids   message         server          
+dihedral_write  displace_atoms  info            minimize        read_data       
+read_dump       read_restart    replicate       rerun           run             
+set             velocity        write_coeff     write_data      write_dump      
+write_restart   
+

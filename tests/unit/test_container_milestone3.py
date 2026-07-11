@@ -160,8 +160,16 @@ def test_versions_manifest_records_independent_md_candidate() -> None:
     assert candidate["build"]["kokkos"]["arch"]["gpu"] == "HOPPER90"
     assert candidate["probe_model"]["purpose"] == "integration_probe_only"
     assert candidate["probe_model"]["scientifically_valid"] is False
-    assert candidate["validation"]["sif_conversion"] == "not_run"
-    assert candidate["validation"]["miyabi_gh200"] == "not_run"
+    assert candidate["validation"]["sif_conversion"] is True
+    assert candidate["validation"]["hpcx_diagnosed"] is True
+    assert candidate["validation"]["torch_cuda_gate"] is True
+    assert candidate["validation"]["runtime"] is True
+    assert candidate["validation"]["pair_allegro_runtime"] is True
+    assert candidate["validation"]["run0"] is True
+    assert candidate["validation"]["run10"] is True
+    assert candidate["validation"]["thermo_finite"] is True
+    assert candidate["validation"]["miyabi_gh200"] is True
+    assert candidate["miyabi_runtime_details"]["pair_style"] == "allegro/kk"
 
     floating = {"latest", "stable", "main"}
     assert not any(value.lower() in floating or value.lower().endswith(tuple(f":{x}" for x in floating)) for value in strings(candidate))

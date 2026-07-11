@@ -1,0 +1,111 @@
+#!/bin/bash
+#PBS -q debug-g
+#PBS -W group_list=gw34
+#PBS -l select=1
+#PBS -l walltime=00:15:00
+#PBS -N phal-md-probe
+#PBS -j oe
+
+set -euo pipefail
+cd "$PBS_O_WORKDIR"
+module purge
+module load apptainer/1.3.5
+
+: "${PHAL_MD_PROBE_IMAGE:?PHAL_MD_PROBE_IMAGE is not set}"
+test -f "$PHAL_MD_PROBE_IMAGE"
+
+LOG_DIR="$PBS_O_WORKDIR/runtime/logs/md-probe"
+JOB_TMP_ROOT="${TMPDIR:-/tmp/${USER}/${PBS_JOBID}}"
+export APPTAINER_TMPDIR="$JOB_TMP_ROOT/phal-md-probe-apptainer"
+mkdir -p "$LOG_DIR" "$APPTAINER_TMPDIR"
+trap 'rm -rf "$APPTAINER_TMPDIR"' EXIT
+
+ENV_LOG="$LOG_DIR/environment-${PBS_JOBID}.log"
+CUDA_LOG="$LOG_DIR/cuda-gate-${PBS_JOBID}.json.log"
+HELP_LOG="$LOG_DIR/lmp-help-${PBS_JOBID}.log"
+PAIR_LOG="$LOG_DIR/pair-allegro-${PBS_JOBID}.log"
+RUN0_LOG="$LOG_DIR/run0-${PBS_JOBID}.log"
+RUN10_LOG="$LOG_DIR/run10-${PBS_JOBID}.log"
+SUMMARY_LOG="$LOG_DIR/summary-${PBS_JOBID}.json"
+RUNTIME_PREFIX='unset OPAL_PREFIX; export LD_LIBRARY_PATH="/opt/hpcx/ucx/lib:/opt/hpcx/ucc/lib:${LD_LIBRARY_PATH:-}"; exec "$@"'
+
+container_run() {
+  apptainer exec --cleanenv --nv --bind "$PBS_O_WORKDIR/runtime:/runtime" \
+    "$PHAL_MD_PROBE_IMAGE" sh -lc "$RUNTIME_PREFIX" sh "$@"
+}
+
+probe_run() {
+  apptainer exec --cleanenv --nv --bind "$PBS_O_WORKDIR/runtime:/runtime" \
+    "$PHAL_MD_PROBE_IMAGE" sh -lc \
+    'unset OPAL_PREFIX; export LD_LIBRARY_PATH="/opt/hpcx/ucx/lib:/opt/hpcx/ucc/lib:${LD_LIBRARY_PATH:-}"; cd /opt/phal/probes/md; exec "$@"' \
+    sh "$@"
+}
+
+{
+  echo "job_id=$PBS_JOBID"
+  echo "hostname=$(hostname)"
+  echo "queue=debug-g"
+  echo "project=gw34"
+  echo "image=$PHAL_MD_PROBE_IMAGE"
+  echo "apptainer=$(apptainer version)"
+  echo "start_time=$(date --iso-8601=seconds)"
+} | tee "$ENV_LOG"
+
+container_run python -c '
+import json, platform, torch
+result = {
+  "machine": platform.machine(), "torch": torch.__version__, "cuda_runtime": torch.version.cuda,
+  "cuda_available": torch.cuda.is_available(), "device_count": torch.cuda.device_count(),
+  "gpu_name": None, "capability": None, "tensor_test": False,
+}
+if result["cuda_available"]:
+  result["gpu_name"] = torch.cuda.get_device_name(0)
+  result["capability"] = list(torch.cuda.get_device_capability(0))
+  a = torch.randn((128, 128), device="cuda"); b = torch.randn((128, 128), device="cuda"); c = a @ b
+  result["tensor_test"] = bool(torch.isfinite(c).all().item())
+print(json.dumps(result, sort_keys=True))
+passed = (result["machine"] == "aarch64" and result["cuda_available"] and result["device_count"] >= 1
+          and "GH200" in (result["gpu_name"] or "") and result["capability"] == [9, 0] and result["tensor_test"])
+if not passed: raise SystemExit(1)
+' 2>&1 | tee "$CUDA_LOG"
+
+container_run /opt/lammps/bin/lmp -h 2>&1 | tee "$HELP_LOG"
+grep -q 'Large-scale Atomic/Molecular Massively Parallel Simulator' "$HELP_LOG"
+if grep -Eqi 'shared librar|ucs_config_doc_nop|libcuda\.so\.1.*not found' "$HELP_LOG"; then exit 1; fi
+grep -Ei '(^|[[:space:]])allegro(/kk)?([[:space:]]|$)' "$HELP_LOG" | tee "$PAIR_LOG"
+test -s "$PAIR_LOG"
+
+LMP=(/opt/lammps/bin/lmp -k on g 1 -sf kk -pk kokkos newton on neigh half)
+probe_run "${LMP[@]}" -in in.run0 2>&1 | tee "$RUN0_LOG"
+grep -q 'Loop time' "$RUN0_LOG"
+grep -q 'Neighbor list builds' "$RUN0_LOG"
+if grep -Eqi '(^|[^[:alpha:]])(nan|inf)([^[:alpha:]]|$)|segmentation fault|illegal memory access|cuda error|unknown pair style|incorrect args for pair' "$RUN0_LOG"; then exit 1; fi
+
+probe_run "${LMP[@]}" -in in.run10 2>&1 | tee "$RUN10_LOG"
+grep -q 'Loop time' "$RUN10_LOG"
+grep -q 'Neighbor list builds' "$RUN10_LOG"
+if grep -Eqi '(^|[^[:alpha:]])(nan|inf)([^[:alpha:]]|$)|segmentation fault|illegal memory access|cuda error|unknown pair style|incorrect args for pair' "$RUN10_LOG"; then exit 1; fi
+
+python - "$RUN10_LOG" <<'PY'
+import math, sys
+lines = open(sys.argv[1], encoding="utf-8", errors="replace").read().splitlines()
+headers = [i for i, line in enumerate(lines) if line.split() == ["Step", "Temp", "PotEng", "KinEng", "TotEng"]]
+if not headers: raise SystemExit("thermo header missing")
+rows = []
+for line in lines[headers[-1] + 1:]:
+    parts = line.split()
+    if len(parts) == 5:
+        try: values = [float(value) for value in parts]
+        except ValueError: continue
+        rows.append(values)
+if not rows or int(rows[-1][0]) != 10 or not all(math.isfinite(value) for row in rows for value in row):
+    raise SystemExit("thermo rows missing, incomplete, or non-finite")
+PY
+
+cat > "$SUMMARY_LOG" <<EOF
+{"job_id":"$PBS_JOBID","node":"$(hostname)","queue":"debug-g","project":"gw34","sif_sha256":"0b6307d80fff7a94aa69b807194854dc05d30fba6fe463f41d8906aace923627","torch_cuda_gate":"passed","lmp_help":"passed","pair_allegro":"passed","run0":"passed","run10":"passed","thermo_finite":true,"exit_status":0}
+EOF
+{
+  echo "end_time=$(date --iso-8601=seconds)"
+  echo "status=passed"
+} | tee -a "$ENV_LOG"

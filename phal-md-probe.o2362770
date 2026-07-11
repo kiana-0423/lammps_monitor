@@ -1,0 +1,51 @@
+/home/w34000/.bashrc: line 29: /home/w34000/software/conda/etc/profile.d/conda.sh: No such file or directory
+Loading apptainer/1.3.5
+  Loading requirement: squashfuse/0.5.2 gocryptfs/2.4.0
+job_id=2362770.opbs
+hostname=mg0004
+queue=debug-g
+project=gw34
+image=/work/gw34/w34000/project/lammps_monitor/build/containers/md-probe-m3-md-probe-a-arm64.sif
+apptainer=1.3.5
+start_time=2026-07-11T20:54:58+09:00
+/usr/local/lib/python3.12/dist-packages/torch/cuda/__init__.py:63: FutureWarning: The pynvml package is deprecated. Please install nvidia-ml-py instead. If you did not install pynvml directly, please report this to the maintainers of the package that installed pynvml for you.
+  import pynvml  # type: ignore[import]
+{"capability": [9, 0], "cuda_available": true, "cuda_runtime": "13.0", "device_count": 1, "gpu_name": "NVIDIA GH200 120GB", "machine": "aarch64", "tensor_test": true, "torch": "2.9.0a0+50eac811a6.nv25.09"}
+--------------------------------------------------------------------------
+It looks like opal_init failed for some reason; your parallel process is
+likely to abort.  There are many reasons that a parallel process can
+fail during opal_init; some of which are due to configuration or
+environment problems.  This failure appears to be an internal failure;
+here's some additional information (which may only be relevant to an
+Open MPI developer):
+
+  opal_shmem_base_select failed
+  --> Returned value -1 instead of OPAL_SUCCESS
+--------------------------------------------------------------------------
+--------------------------------------------------------------------------
+It looks like orte_init failed for some reason; your parallel process is
+likely to abort.  There are many reasons that a parallel process can
+fail during orte_init; some of which are due to configuration or
+environment problems.  This failure appears to be an internal failure;
+here's some additional information (which may only be relevant to an
+Open MPI developer):
+
+  opal_init failed
+  --> Returned value Error (-1) instead of ORTE_SUCCESS
+--------------------------------------------------------------------------
+--------------------------------------------------------------------------
+It looks like MPI_INIT failed for some reason; your parallel process is
+likely to abort.  There are many reasons that a parallel process can
+fail during MPI_INIT; some of which are due to configuration or environment
+problems.  This failure appears to be an internal failure; here's some
+additional information (which may only be relevant to an Open MPI
+developer):
+
+  ompi_mpi_init: ompi_rte_init failed
+  --> Returned "Error" (-1) instead of "Success" (0)
+--------------------------------------------------------------------------
+*** An error occurred in MPI_Init
+*** on a NULL communicator
+*** MPI_ERRORS_ARE_FATAL (processes in this communicator will now abort,
+***    and potentially your MPI job)
+[mg0004:1082633] Local abort before MPI_INIT completed completed successfully, but am not able to aggregate error messages, and not able to guarantee that all other processes were killed!

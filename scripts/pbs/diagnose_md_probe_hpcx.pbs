@@ -1,0 +1,112 @@
+#!/bin/bash
+#PBS -q debug-g
+#PBS -W group_list=gw34
+#PBS -l select=1
+#PBS -l walltime=00:10:00
+#PBS -N phal-md-hpcx-diag
+#PBS -j oe
+
+set -euo pipefail
+cd "$PBS_O_WORKDIR"
+module purge
+module load apptainer/1.3.5
+
+: "${PHAL_MD_PROBE_IMAGE:?PHAL_MD_PROBE_IMAGE is not set}"
+test -f "$PHAL_MD_PROBE_IMAGE"
+
+LOG_DIR="$PBS_O_WORKDIR/runtime/logs/md-probe-hpcx"
+JOB_TMP_ROOT="${TMPDIR:-/tmp/${USER}/${PBS_JOBID}}"
+export APPTAINER_TMPDIR="$JOB_TMP_ROOT/phal-md-hpcx-diag"
+mkdir -p "$LOG_DIR" "$APPTAINER_TMPDIR"
+trap 'rm -rf "$APPTAINER_TMPDIR"' EXIT
+
+HOST_LOG="$LOG_DIR/host-${PBS_JOBID}.log"
+DEFAULT_LOG="$LOG_DIR/container-default-${PBS_JOBID}.log"
+SYMBOL_LOG="$LOG_DIR/libucs-symbols-${PBS_JOBID}.log"
+ENV_LOG="$LOG_DIR/override-env-${PBS_JOBID}.log"
+INSHELL_LOG="$LOG_DIR/override-inshell-${PBS_JOBID}.log"
+NO_UCC_LOG="$LOG_DIR/without-ucc-${PBS_JOBID}.log"
+SMOKE_LOG="$LOG_DIR/cuda-smoke-${PBS_JOBID}.json.log"
+SUMMARY_LOG="$LOG_DIR/summary-${PBS_JOBID}.log"
+
+{
+  hostname
+  uname -a
+  module list 2>&1 || true
+  env | sort
+  ldconfig -p 2>/dev/null | grep -E 'libcuda|libucs|libucp|libucc' || true
+  find /opt /usr -type f \( -name 'libucs.so*' -o -name 'libucp.so*' -o -name 'libucc.so*' \) 2>/dev/null | sort || true
+} > "$HOST_LOG" 2>&1
+
+apptainer exec --cleanenv --nv "$PHAL_MD_PROBE_IMAGE" sh -lc '
+  echo "=== ENV ==="; env | sort
+  echo "=== LD_LIBRARY_PATH ==="; printf "%s\n" "${LD_LIBRARY_PATH:-}"
+  echo "=== HPC-X libraries ==="
+  find /opt/hpcx -type f \( -name "libucs.so*" -o -name "libucp.so*" -o -name "libucc.so*" \) -print 2>/dev/null | sort
+  echo "=== ldd libucc ==="; ldd /opt/hpcx/ucc/lib/libucc.so.1 || true
+  echo "=== RUNPATH ==="; readelf -d /opt/hpcx/ucc/lib/libucc.so.1 | grep -E "NEEDED|RPATH|RUNPATH" || true
+' > "$DEFAULT_LOG" 2>&1
+
+apptainer exec --cleanenv --nv "$PHAL_MD_PROBE_IMAGE" sh -lc '
+  find /opt/hpcx /usr /usr/local -type f -name "libucs.so*" 2>/dev/null | while read -r lib; do
+    echo "=== $lib ==="
+    nm -D "$lib" 2>/dev/null | grep "ucs_config_doc_nop" || true
+  done
+' > "$SYMBOL_LOG" 2>&1
+
+set +e
+apptainer exec --cleanenv --nv "$PHAL_MD_PROBE_IMAGE" env \
+  LD_LIBRARY_PATH="/opt/hpcx/ucx/lib:/opt/hpcx/ucc/lib:${LD_LIBRARY_PATH:-}" \
+  sh -lc 'echo "$LD_LIBRARY_PATH"; ldd /opt/hpcx/ucc/lib/libucc.so.1; python -c "import torch; print(torch.__version__); print(torch.version.cuda); print(torch.cuda.is_available()); print(torch.cuda.get_device_name(0) if torch.cuda.is_available() else None)"' \
+  > "$ENV_LOG" 2>&1
+ENV_RC=$?
+
+apptainer exec --cleanenv --nv "$PHAL_MD_PROBE_IMAGE" sh -lc '
+  export LD_LIBRARY_PATH="/opt/hpcx/ucx/lib:/opt/hpcx/ucc/lib:${LD_LIBRARY_PATH:-}"
+  echo "$LD_LIBRARY_PATH"
+  ldd /opt/hpcx/ucc/lib/libucc.so.1
+  python -c "import torch; print(torch.__version__); print(torch.version.cuda); print(torch.cuda.is_available()); print(torch.cuda.get_device_name(0) if torch.cuda.is_available() else None)"
+' > "$INSHELL_LOG" 2>&1
+INSHELL_RC=$?
+
+apptainer exec --cleanenv --nv "$PHAL_MD_PROBE_IMAGE" sh -lc '
+  NEW_LD_LIBRARY_PATH="$(printf "%s" "${LD_LIBRARY_PATH:-}" | tr ":" "\n" | grep -v "^/opt/hpcx/ucc/lib$" | paste -sd: -)"
+  export LD_LIBRARY_PATH="$NEW_LD_LIBRARY_PATH"
+  echo "$LD_LIBRARY_PATH"
+  python -c "import torch; print(torch.__version__); print(torch.version.cuda); print(torch.cuda.is_available()); print(torch.cuda.get_device_name(0) if torch.cuda.is_available() else None)"
+' > "$NO_UCC_LOG" 2>&1
+NO_UCC_RC=$?
+set -e
+
+if (( INSHELL_RC == 0 )); then
+  STRATEGY=inshell-ucx-before-ucc
+  PREFIX='export LD_LIBRARY_PATH="/opt/hpcx/ucx/lib:/opt/hpcx/ucc/lib:${LD_LIBRARY_PATH:-}"'
+elif (( NO_UCC_RC == 0 )); then
+  STRATEGY=single-gpu-without-ucc
+  PREFIX='export LD_LIBRARY_PATH="$(printf "%s" "${LD_LIBRARY_PATH:-}" | tr ":" "\n" | grep -v "^/opt/hpcx/ucc/lib$" | paste -sd: -)"'
+else
+  printf 'env_rc=%s\ninshell_rc=%s\nwithout_ucc_rc=%s\nstrategy=none\n' "$ENV_RC" "$INSHELL_RC" "$NO_UCC_RC" | tee "$SUMMARY_LOG"
+  exit 1
+fi
+
+apptainer exec --cleanenv --nv "$PHAL_MD_PROBE_IMAGE" sh -lc "$PREFIX
+python - <<'PY'
+import json
+import torch
+result = {
+    'torch': torch.__version__, 'torch_cuda': torch.version.cuda,
+    'cuda_available': torch.cuda.is_available(), 'device_count': torch.cuda.device_count(),
+    'gpu_name': None, 'capability': None, 'tensor_test': False,
+}
+if result['cuda_available']:
+    result['gpu_name'] = torch.cuda.get_device_name(0)
+    result['capability'] = list(torch.cuda.get_device_capability(0))
+    a = torch.randn((128, 128), device='cuda'); b = torch.randn((128, 128), device='cuda'); c = a @ b
+    result['tensor_test'] = bool(torch.isfinite(c).all().item())
+print(json.dumps(result, sort_keys=True))
+if not result['cuda_available'] or not result['tensor_test']:
+    raise SystemExit(1)
+PY" > "$SMOKE_LOG" 2>&1
+
+printf 'env_rc=%s\ninshell_rc=%s\nwithout_ucc_rc=%s\nstrategy=%s\nstatus=passed\n' \
+  "$ENV_RC" "$INSHELL_RC" "$NO_UCC_RC" "$STRATEGY" | tee "$SUMMARY_LOG"

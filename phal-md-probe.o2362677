@@ -1,0 +1,14 @@
+/home/w34000/.bashrc: line 29: /home/w34000/software/conda/etc/profile.d/conda.sh: No such file or directory
+Loading apptainer/1.3.5
+  Loading requirement: squashfuse/0.5.2 gocryptfs/2.4.0
+job_id=2362677.opbs
+hostname=mg0016
+image=/work/gw34/w34000/project/lammps_monitor/build/containers/md-probe-m3-md-probe-a-arm64.sif
+apptainer=1.3.5
+start_time=2026-07-11T20:26:18+09:00
+Traceback (most recent call last):
+  File "<string>", line 2, in <module>
+  File "/usr/local/lib/python3.12/dist-packages/torch/__init__.py", line 415, in <module>
+    from torch._C import *  # noqa: F403
+    ^^^^^^^^^^^^^^^^^^^^^^
+ImportError: /opt/hpcx/ucc/lib/libucc.so.1: undefined symbol: ucs_config_doc_nop

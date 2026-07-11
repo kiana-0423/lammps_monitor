@@ -96,10 +96,12 @@ candidates:
     base_image_digest: "sha256:513aeaf7e997caa3b743ecc4b7c4d0defdfabd01a13de3f83841f2dc21810e86"
     base_train_probe_digest: "sha256:513aeaf7e997caa3b743ecc4b7c4d0defdfabd01a13de3f83841f2dc21810e86"
     oci_image: "ghcr.io/kiana-0423/md-probe:m3-md-probe-a"
-    oci_digest: null
+    oci_digest: "sha256:d684ffa628091e6277c3f4b98c4de6cd5ef53aa59b210387f253ac0b5e957885"
     arm64_manifest_digest: null
     attestation_digest: null
-    pinned_oci_image: null
+    pinned_oci_image: "ghcr.io/kiana-0423/md-probe@sha256:d684ffa628091e6277c3f4b98c4de6cd5ef53aa59b210387f253ac0b5e957885"
+    sif_path: "build/containers/md-probe-m3-md-probe-a-arm64.sif"
+    sif_sha256: "0b6307d80fff7a94aa69b807194854dc05d30fba6fe463f41d8906aace923627"
     lammps:
       repository: "https://github.com/lammps/lammps.git"
       tag: "patch_10Sep2025"
@@ -139,7 +141,7 @@ candidates:
       training_steps: 0
       type_names: ["H"]
       path: "/opt/phal/probes/md/allegro-probe.nequip.pth"
-      sha256: null
+      sha256: "0c800c6d94f697f461033c8ec19c0b52cc587bac873d07dd7435955a06aa2f54"
     evidence:
       local_build_log: "build/evidence/md-probe-local-build.log"
       local_build_metadata: "build/evidence/md-probe-local-build-metadata.json"
@@ -149,6 +151,29 @@ candidates:
       oci_build_log: "build/evidence/md-probe-oci-build.log"
       oci_build_metadata: "build/evidence/md-probe-oci-build-metadata.json"
       remote_validation: "build/evidence/md-probe-remote-validation.log"
+      sif_conversion: "build/evidence/md-probe-sif-conversion.log"
+      sif_inspect: "build/evidence/md-probe-sif-inspect.txt"
+      sif_sha256: "build/evidence/md-probe-sif.sha256"
+      hpcx_diagnostic_summary: "runtime/logs/md-probe-hpcx/summary-2362706.opbs.log"
+      runtime_job_id: "build/evidence/md-probe-gh200-runtime-job-id.txt"
+      runtime_history: "build/evidence/md-probe-gh200-runtime-history.log"
+      runtime_trace: "build/evidence/md-probe-gh200-runtime-trace.log"
+      runtime_pbs_output: "build/evidence/md-probe-gh200-runtime-pbs-output.log"
+      cuda_gate: "runtime/logs/md-probe/cuda-gate-2362776.opbs.json.log"
+      lmp_help: "runtime/logs/md-probe/lmp-help-2362776.opbs.log"
+      pair_allegro: "runtime/logs/md-probe/pair-allegro-2362776.opbs.log"
+      run0: "runtime/logs/md-probe/run0-2362776.opbs.log"
+      run10: "runtime/logs/md-probe/run10-2362776.opbs.log"
+      runtime_summary: "runtime/logs/md-probe/summary-2362776.opbs.json"
+    miyabi_runtime_details:
+      pbs_job_id: "2362776.opbs"
+      compute_node: "mg0004"
+      gpu_name: "NVIDIA GH200 120GB"
+      gpu_capability: [9, 0]
+      cuda_runtime: "13.0"
+      lammps_version: "10 Sep 2025"
+      pair_style: "allegro/kk"
+      runtime_wrapper: 'unset OPAL_PREFIX; export LD_LIBRARY_PATH="/opt/hpcx/ucx/lib:/opt/hpcx/ucc/lib:${LD_LIBRARY_PATH:-}"'
     validation:
       local_image_build: false
       lmp_help: false
@@ -161,8 +186,15 @@ candidates:
       oci_push: false
       remote_oci_pull: false
       remote_oci_validation: false
-      sif_conversion: "not_run"
-      miyabi_gh200: "not_run"
+      sif_conversion: true
+      hpcx_diagnosed: true
+      torch_cuda_gate: true
+      runtime: true
+      pair_allegro_runtime: true
+      run0: true
+      run10: true
+      thermo_finite: true
+      miyabi_gh200: true
 
 # Reserved locations only. Milestone 2 does not implement these stacks.
 future_stacks:
