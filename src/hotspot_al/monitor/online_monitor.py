@@ -128,17 +128,16 @@ class OnlineMonitor:
 
         result = self.process_frame(frame, frame_index=frame_index)
         self._record_progress(result)
+        self._handle_trigger(frame, result)
         event = self.buffer.push(frame)
-        finalized_event = event is not None
         if event is not None:
             self._handle_event(event)
-        self._handle_trigger(frame, result, finalized_event=finalized_event)
         return result
 
-    def _handle_trigger(self, frame: FrameData, result: OODFrameResult, *, finalized_event: bool) -> None:
+    def _handle_trigger(self, frame: FrameData, result: OODFrameResult) -> None:
         """Capture a new event for a triggered frame when not already finalized."""
 
-        if not result.triggered or finalized_event or self._last_event_step == frame.step:
+        if not result.triggered or self._last_event_step == frame.step:
             return
         completed = self.buffer.capture_event(
             frame,

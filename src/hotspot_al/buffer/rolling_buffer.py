@@ -58,13 +58,29 @@ class RollingBuffer:
         model_version: str | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> EventRecord | None:
-        """Start capturing an event around a trigger frame."""
+        """Start an event, or merge a repeated trigger into the pending event.
+
+        Repeated triggers do not reset the post-trigger window.  The original
+        trigger frame and all buffered frames are retained; hotspot atoms and
+        reasons are unioned, while per-atom scores retain their maximum value.
+        """
+
+        if self._pending is not None:
+            self._merge_trigger(
+                trigger_frame,
+                hotspot_atoms=hotspot_atoms,
+                ood_scores=ood_scores,
+                trigger_reason=trigger_reason,
+                metadata=metadata,
+            )
+            return None
 
         frames = list(self._frames)
         if frames and frames[-1].step == trigger_frame.step:
             pre_frames = frames[:-1][-self.pre_trigger_frames :]
         else:
             pre_frames = frames[-self.pre_trigger_frames :]
+        initial_metadata = dict(metadata or {})
         self._pending = _PendingEvent(
             pre_frames=pre_frames,
             trigger_frame=trigger_frame,
@@ -76,12 +92,46 @@ class RollingBuffer:
                 "event_id": event_id or f"evt-{trigger_frame.step}-{uuid4().hex[:8]}",
                 "backend": backend,
                 "model_version": model_version,
-                **dict(metadata or {}),
+                **initial_metadata,
+                "latest_trigger_step": trigger_frame.step,
+                "trigger_steps": [trigger_frame.step],
+                "trigger_count": 1,
+                "trigger_metadata": [{"step": trigger_frame.step, **initial_metadata}],
             },
         )
         if self.post_trigger_frames == 0:
             return self._finalize_pending()
         return None
+
+    def _merge_trigger(
+        self,
+        trigger_frame: FrameData,
+        *,
+        hotspot_atoms: list[int],
+        ood_scores: np.ndarray,
+        trigger_reason: list[str],
+        metadata: dict[str, Any] | None,
+    ) -> None:
+        """Merge one trigger into the active event without extending it."""
+
+        assert self._pending is not None
+        pending = self._pending
+        scores = np.asarray(ood_scores, dtype=float)
+        if scores.shape != pending.ood_scores.shape:
+            msg = (
+                "Cannot merge trigger scores with a different shape: "
+                f"{scores.shape} != {pending.ood_scores.shape}."
+            )
+            raise ValueError(msg)
+        pending.hotspot_atoms = sorted(set(pending.hotspot_atoms).union(hotspot_atoms))
+        pending.ood_scores = np.maximum(pending.ood_scores, scores)
+        pending.trigger_reason = list(dict.fromkeys([*pending.trigger_reason, *trigger_reason]))
+        pending.metadata["latest_trigger_step"] = trigger_frame.step
+        pending.metadata["trigger_steps"] = list(
+            dict.fromkeys([*pending.metadata.get("trigger_steps", [pending.trigger_frame.step]), trigger_frame.step])
+        )
+        pending.metadata["trigger_count"] = int(pending.metadata.get("trigger_count", 1)) + 1
+        pending.metadata.setdefault("trigger_metadata", []).append({"step": trigger_frame.step, **dict(metadata or {})})
 
     def flush(self) -> EventRecord | None:
         """Finalize the pending event even if not enough post frames were observed."""

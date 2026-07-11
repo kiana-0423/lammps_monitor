@@ -38,6 +38,7 @@ class JobState(str, Enum):
     COMPLETED = "completed"
     FAILED = "failed"
     CANCELLED = "cancelled"
+    TIMEOUT = "timeout"
     UNKNOWN = "unknown"
 
 

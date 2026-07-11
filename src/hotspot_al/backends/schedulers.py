@@ -132,6 +132,7 @@ class _BatchSchedulerBackend(SchedulerBackend):
         lines = ["#!/bin/bash"]
         lines.extend(self._resource_directives(request.resources))
         lines.append("set -euo pipefail")
+        lines.extend(self._working_directory_lines())
         lines.extend(f"export {key}={shlex.quote(value)}" for key, value in request.environment.items())
         command = shlex.join(request.command)
         if request.stdout_path is not None:
@@ -140,6 +141,9 @@ class _BatchSchedulerBackend(SchedulerBackend):
             command += f" 2> {shlex.quote(str(request.stderr_path))}"
         lines.extend([command, ""])
         return "\n".join(lines)
+
+    def _working_directory_lines(self) -> list[str]:
+        return []
 
     def _resource_directives(self, resources: Mapping[str, Any]) -> list[str]:
         raw = resources.get("directives", "")
@@ -164,25 +168,29 @@ class SlurmSchedulerBackend(_BatchSchedulerBackend):
     def poll(self, job: BackendJob) -> JobState:
         if not job.external_id:
             return JobState.UNKNOWN
-        result = subprocess.run(
-            [self.query_command, "-h", "-j", job.external_id, "-o", "%T"],
-            check=False,
-            text=True,
-            capture_output=True,
-        )
-        raw = result.stdout.strip().splitlines()
-        if not raw:
-            job.state = JobState.UNKNOWN
-            return job.state
-        state = raw[0].strip().upper()
-        job.state = {
-            "PENDING": JobState.PENDING,
-            "RUNNING": JobState.RUNNING,
-            "COMPLETED": JobState.COMPLETED,
-            "CANCELLED": JobState.CANCELLED,
-            "FAILED": JobState.FAILED,
-            "TIMEOUT": JobState.FAILED,
-        }.get(state, JobState.UNKNOWN)
+        try:
+            result = subprocess.run(
+                [self.query_command, "-h", "-j", job.external_id, "-o", "%T"],
+                check=False,
+                text=True,
+                capture_output=True,
+            )
+        except FileNotFoundError:
+            result = None
+        state = _first_status(result.stdout) if result is not None and result.returncode == 0 else None
+        if state is None:
+            try:
+                result = subprocess.run(
+                    ["sacct", "-n", "-X", "-j", job.external_id, "--format=State"],
+                    check=False,
+                    text=True,
+                    capture_output=True,
+                )
+            except FileNotFoundError:
+                job.state = JobState.UNKNOWN
+                return job.state
+            state = _first_status(result.stdout) if result.returncode == 0 else None
+        job.state = _slurm_state(state)
         return job.state
 
 
@@ -195,23 +203,81 @@ class PBSSchedulerBackend(_BatchSchedulerBackend):
     directive_prefix = "#PBS"
     script_name = "submit.pbs"
 
+    def __init__(self, config: Mapping[str, Any] | None = None) -> None:
+        super().__init__(config)
+        pbs_config = self.config.get("pbs", {})
+        self.history_query_enabled = bool(pbs_config.get("history_query_enabled", True))
+
+    def _working_directory_lines(self) -> list[str]:
+        return ['cd "$PBS_O_WORKDIR"']
+
     def poll(self, job: BackendJob) -> JobState:
         if not job.external_id:
             return JobState.UNKNOWN
-        result = subprocess.run([self.query_command, job.external_id], check=False, text=True, capture_output=True)
-        if result.returncode != 0:
+        try:
+            result = subprocess.run(
+                [self.query_command, "-f", job.external_id], check=False, text=True, capture_output=True
+            )
+        except FileNotFoundError:
             job.state = JobState.UNKNOWN
             return job.state
-        output = result.stdout.upper()
-        if " R " in output:
-            job.state = JobState.RUNNING
-        elif " Q " in output or " H " in output:
-            job.state = JobState.PENDING
-        elif " C " in output:
-            job.state = JobState.COMPLETED
-        else:
-            job.state = JobState.UNKNOWN
+        output = result.stdout if result.returncode == 0 else ""
+        if not output and self.history_query_enabled:
+            try:
+                result = subprocess.run(
+                    [self.query_command, "-x", "-f", job.external_id], check=False, text=True, capture_output=True
+                )
+            except FileNotFoundError:
+                result = None
+            if result is not None and result.returncode == 0:
+                output = result.stdout
+        job.state = _pbs_state(output)
         return job.state
+
+
+def _first_status(output: str) -> str | None:
+    for line in output.splitlines():
+        if line.strip():
+            return line.strip().split()[0].rstrip("+").upper()
+    return None
+
+
+def _slurm_state(state: str | None) -> JobState:
+    normalized = "" if state is None else state.split()[0].rstrip("+").upper()
+    return {
+        "PENDING": JobState.PENDING,
+        "CONFIGURING": JobState.PENDING,
+        "RUNNING": JobState.RUNNING,
+        "COMPLETING": JobState.RUNNING,
+        "COMPLETED": JobState.COMPLETED,
+        "CANCELLED": JobState.CANCELLED,
+        "FAILED": JobState.FAILED,
+        "OUT_OF_MEMORY": JobState.FAILED,
+        "NODE_FAIL": JobState.FAILED,
+        "PREEMPTED": JobState.FAILED,
+        "TIMEOUT": JobState.TIMEOUT,
+    }.get(normalized, JobState.UNKNOWN)
+
+
+def _pbs_state(output: str) -> JobState:
+    fields: dict[str, str] = {}
+    for line in output.splitlines():
+        if "=" in line:
+            key, value = line.split("=", 1)
+            fields[key.strip().lower()] = value.strip()
+    state = fields.get("job_state", "").upper()
+    if state in {"Q", "H", "W", "S"}:
+        return JobState.PENDING
+    if state in {"R", "E", "B"}:
+        return JobState.RUNNING
+    if state == "F":
+        try:
+            return JobState.COMPLETED if int(fields.get("exit_status", "1")) == 0 else JobState.FAILED
+        except ValueError:
+            return JobState.UNKNOWN
+    if state == "C":
+        return JobState.COMPLETED
+    return JobState.UNKNOWN
 
 
 def _open_output(work_dir: Path, path: Path):

@@ -99,6 +99,8 @@ def test_online_monitor_triggers_buffer_and_callback() -> None:
     assert len(events) == 1
     assert events[0].trigger_frame.step == 0
     assert [frame.step for frame in events[0].post_frames] == [1]
+    assert events[0].metadata["trigger_steps"] == [0, 1]
+    assert events[0].hotspot_atoms == [0, 1, 2, 3]
     assert evaluator.calls == 6
 
 
