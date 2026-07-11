@@ -1,0 +1,107 @@
+# syntax=docker/dockerfile:1
+ARG BASE_IMAGE
+FROM ${BASE_IMAGE}
+
+ARG BASE_IMAGE
+ARG IMAGE_TAG
+ARG LAMMPS_REPOSITORY=https://github.com/lammps/lammps.git
+ARG LAMMPS_COMMIT=9792f6a9a32517780a8276c8ab201f17cae37d6b
+ARG PAIR_NEQUIP_ALLEGRO_REPOSITORY=https://github.com/mir-group/pair_nequip_allegro.git
+ARG PAIR_NEQUIP_ALLEGRO_COMMIT=402b28390403aa92f34f14c2d5a9ff918acec598
+ARG LAMMPS_BUILD_JOBS=4
+
+LABEL org.opencontainers.image.title="PHAL ARM64 MD stack probe" \
+      org.opencontainers.image.description="Milestone 3 probe for LAMMPS + Kokkos + pair_allegro on linux/arm64" \
+      org.opencontainers.image.version="${IMAGE_TAG}" \
+      org.opencontainers.image.source="containers/Dockerfile.md-probe" \
+      org.phal.versions-file="containers/versions.yaml" \
+      org.phal.stage="md-probe"
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PHAL_HOME=/opt/phal \
+    PHAL_CONFIG_DIR=/opt/phal/configs \
+    PHAL_RUNTIME_DIR=/runtime \
+    LAMMPS_HOME=/opt/lammps \
+    LAMMPS_SOURCE_DIR=/opt/src/lammps \
+    PAIR_NEQUIP_ALLEGRO_SOURCE_DIR=/opt/src/pair_nequip_allegro \
+    PHAL_MD_PROBE_DIR=/opt/phal/probes/md \
+    LD_LIBRARY_PATH=/usr/local/lib/python3.12/dist-packages/torch/lib:/usr/local/cuda/lib64
+
+RUN test -n "${BASE_IMAGE}" \
+    && test -n "${IMAGE_TAG}" \
+    && test -n "${LAMMPS_COMMIT}" \
+    && test -n "${PAIR_NEQUIP_ALLEGRO_COMMIT}" \
+    && test -n "${LAMMPS_BUILD_JOBS}" \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends \
+        ca-certificates \
+        cmake \
+        file \
+        g++ \
+        gcc \
+        git \
+        libgomp1 \
+        libopenmpi-dev \
+        make \
+        ninja-build \
+        openmpi-bin \
+        pkg-config \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /opt/phal
+
+COPY containers/scripts/build_md_probe_model.py /opt/phal/containers/scripts/build_md_probe_model.py
+COPY containers/scripts/validate_md_stack.py /opt/phal/containers/scripts/validate_md_stack.py
+COPY containers/scripts/validate_md_binary_static.py /opt/phal/containers/scripts/validate_md_binary_static.py
+COPY containers/scripts/patch_pair_nequip_allegro_lammps_10sep2025.py /opt/phal/containers/scripts/patch_pair_nequip_allegro_lammps_10sep2025.py
+COPY containers/probes/md-probe /opt/phal/containers/probes/md-probe
+
+RUN mkdir -p /opt/src "${LAMMPS_HOME}" "${PHAL_MD_PROBE_DIR}" \
+    && git clone --filter=blob:none "${LAMMPS_REPOSITORY}" "${LAMMPS_SOURCE_DIR}" \
+    && cd "${LAMMPS_SOURCE_DIR}" \
+    && git fetch --depth 1 origin "${LAMMPS_COMMIT}" \
+    && git checkout --detach "${LAMMPS_COMMIT}" \
+    && git clone --filter=blob:none "${PAIR_NEQUIP_ALLEGRO_REPOSITORY}" "${PAIR_NEQUIP_ALLEGRO_SOURCE_DIR}" \
+    && cd "${PAIR_NEQUIP_ALLEGRO_SOURCE_DIR}" \
+    && git fetch --depth 1 origin "${PAIR_NEQUIP_ALLEGRO_COMMIT}" \
+    && git checkout --detach "${PAIR_NEQUIP_ALLEGRO_COMMIT}" \
+    && python /opt/phal/containers/scripts/patch_pair_nequip_allegro_lammps_10sep2025.py "${PAIR_NEQUIP_ALLEGRO_SOURCE_DIR}" \
+    && ./patch_lammps.sh "${LAMMPS_SOURCE_DIR}"
+
+RUN unset OPAL_PREFIX \
+    && export NVCC_WRAPPER_DEFAULT_COMPILER=/usr/bin/mpicxx.openmpi \
+    && cmake \
+        -S "${LAMMPS_SOURCE_DIR}/cmake" \
+        -B "${LAMMPS_SOURCE_DIR}/build" \
+        -G Ninja \
+        -D CMAKE_BUILD_TYPE=Release \
+        -D CMAKE_INSTALL_PREFIX="${LAMMPS_HOME}" \
+        -D CMAKE_CXX_COMPILER="${LAMMPS_SOURCE_DIR}/lib/kokkos/bin/nvcc_wrapper" \
+        -D CMAKE_EXE_LINKER_FLAGS=-Wl,--allow-shlib-undefined \
+        -D CMAKE_PREFIX_PATH=/usr/local/lib/python3.12/dist-packages/torch/share/cmake \
+        -D MKL_INCLUDE_DIR=/tmp \
+        -D BUILD_MPI=on \
+        -D MPI_CXX_COMPILER=/usr/bin/mpicxx.openmpi \
+        -D BUILD_SHARED_LIBS=off \
+        -D PKG_KOKKOS=on \
+        -D Kokkos_ENABLE_CUDA=on \
+        -D Kokkos_ENABLE_SERIAL=on \
+        -D Kokkos_ENABLE_CUDA_LAMBDA=on \
+        -D Kokkos_ARCH_HOPPER90=on \
+        -D Kokkos_ARCH_ARMV9_GRACE=on \
+        -D KOKKOS_PREC=double \
+        -D NEQUIP_AOT_COMPILE=off \
+    && cmake --build "${LAMMPS_SOURCE_DIR}/build" --target lmp --parallel "${LAMMPS_BUILD_JOBS}" \
+    && cmake --install "${LAMMPS_SOURCE_DIR}/build" \
+    && ln -s "${LAMMPS_HOME}/bin/lmp" /usr/local/bin/lmp \
+    && python /opt/phal/containers/scripts/validate_md_binary_static.py
+
+RUN export LD_LIBRARY_PATH="/opt/hpcx/ucx/lib:/opt/hpcx/ucc/lib:${LD_LIBRARY_PATH:-}" \
+    && python -c "import torch, nequip, allegro; print(torch.__version__); print(nequip.__version__); print(allegro.__version__)" \
+    && python /opt/phal/containers/scripts/build_md_probe_model.py \
+    && cp /opt/phal/containers/probes/md-probe/* "${PHAL_MD_PROBE_DIR}/" \
+    && python /opt/phal/containers/scripts/validate_md_binary_static.py
+
+CMD ["python", "/opt/phal/containers/scripts/validate_md_binary_static.py"]

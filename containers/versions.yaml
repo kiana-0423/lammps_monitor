@@ -90,6 +90,79 @@ candidates:
       torch_cuda: true
       allegro_cpu_inference: true
       allegro_gpu_inference: true
+  md_stack_a:
+    image_tag: "m3-md-probe-a"
+    base_image: "ghcr.io/kiana-0423/train-probe"
+    base_image_digest: "sha256:513aeaf7e997caa3b743ecc4b7c4d0defdfabd01a13de3f83841f2dc21810e86"
+    base_train_probe_digest: "sha256:513aeaf7e997caa3b743ecc4b7c4d0defdfabd01a13de3f83841f2dc21810e86"
+    oci_image: "ghcr.io/kiana-0423/md-probe:m3-md-probe-a"
+    oci_digest: null
+    arm64_manifest_digest: null
+    attestation_digest: null
+    pinned_oci_image: null
+    lammps:
+      repository: "https://github.com/lammps/lammps.git"
+      tag: "patch_10Sep2025"
+      commit: "9792f6a9a32517780a8276c8ab201f17cae37d6b"
+      minimum_required: "10 Sep 2025"
+    pair_nequip_allegro:
+      repository: "https://github.com/mir-group/pair_nequip_allegro.git"
+      tag: "v0.7.0"
+      commit: "402b28390403aa92f34f14c2d5a9ff918acec598"
+      compatibility_patch: "containers/scripts/patch_pair_nequip_allegro_lammps_10sep2025.py"
+    inherited:
+      train_probe: "ghcr.io/kiana-0423/train-probe@sha256:513aeaf7e997caa3b743ecc4b7c4d0defdfabd01a13de3f83841f2dc21810e86"
+      torch_cxx11_abi: true
+      cuda: "13.0"
+      nequip: "0.18.0"
+      allegro: "0.8.3"
+    build:
+      mpi: true
+      shared_libs: false
+      cmake_generator: "Ninja"
+      kokkos:
+        package: true
+        precision: "double"
+        double_double: true
+        serial: true
+        cuda: true
+        cuda_lambda: true
+        arch:
+          cpu: "ARMV9_GRACE"
+          gpu: "HOPPER90"
+      nequip_aot_compile: false
+      compiled_model_format: "torchscript"
+      local_execution: "single_process_cpu_smoke"
+    probe_model:
+      purpose: "integration_probe_only"
+      scientifically_valid: false
+      training_steps: 0
+      type_names: ["H"]
+      path: "/opt/phal/probes/md/allegro-probe.nequip.pth"
+      sha256: null
+    evidence:
+      local_build_log: "build/evidence/md-probe-local-build.log"
+      local_build_metadata: "build/evidence/md-probe-local-build-metadata.json"
+      local_image_inspect: "build/evidence/md-probe-local-image-inspect.json"
+      local_lmp_help: "build/evidence/md-probe-local-lmp-help.txt"
+      local_validation: "build/evidence/md-probe-local-validation.log"
+      oci_build_log: "build/evidence/md-probe-oci-build.log"
+      oci_build_metadata: "build/evidence/md-probe-oci-build-metadata.json"
+      remote_validation: "build/evidence/md-probe-remote-validation.log"
+    validation:
+      local_image_build: false
+      lmp_help: false
+      pair_allegro_available: false
+      probe_model_compile: false
+      run0_cpu: false
+      run10_cpu: false
+      thermo_finite: false
+      cuda_local: "skipped"
+      oci_push: false
+      remote_oci_pull: false
+      remote_oci_validation: false
+      sif_conversion: "not_run"
+      miyabi_gh200: "not_run"
 
 # Reserved locations only. Milestone 2 does not implement these stacks.
 future_stacks:

@@ -8,7 +8,7 @@ OUTPUT_DIR=${PHAL_CONTAINER_OUTPUT_DIR:-"${PROJECT_ROOT}/build/containers"}
 EVIDENCE_DIR=${PHAL_EVIDENCE_DIR:-"${PROJECT_ROOT}/build/evidence"}
 IMAGE_NAMESPACE=${PHAL_IMAGE_NAMESPACE:-"phal"}
 REGISTRY=${PHAL_REGISTRY:-}
-TARGETS="base md train train-probe cp2k"
+TARGETS="base md train train-probe md-probe cp2k"
 SCAFFOLD_TARGETS="base md train cp2k"
 
 yaml_path_value() {
@@ -87,12 +87,26 @@ version_context() {
         IMAGE_TAG=${PHAL_IMAGE_TAG:-$(yaml_path_value candidates.train_stack_a.image_tag)}
         NEQUIP_VERSION=$(yaml_path_value candidates.train_stack_a.explicit.nequip)
         ALLEGRO_VERSION=$(yaml_path_value candidates.train_stack_a.explicit.allegro)
+    elif [[ "${target}" == "md-probe" ]]; then
+        candidate_base_image=$(yaml_path_value candidates.md_stack_a.base_image)
+        BASE_IMAGE_DIGEST=$(yaml_path_value candidates.md_stack_a.base_image_digest)
+        BASE_IMAGE=${PHAL_BASE_IMAGE:-${candidate_base_image}}
+        if [[ -z "${PHAL_BASE_IMAGE:-}" && -n "${BASE_IMAGE_DIGEST}" && "${BASE_IMAGE_DIGEST}" != "null" ]]; then
+            BASE_IMAGE="${BASE_IMAGE}@${BASE_IMAGE_DIGEST}"
+        fi
+        IMAGE_TAG=${PHAL_IMAGE_TAG:-$(yaml_path_value candidates.md_stack_a.image_tag)}
+        NEQUIP_VERSION=$(yaml_path_value candidates.train_stack_a.explicit.nequip)
+        ALLEGRO_VERSION=$(yaml_path_value candidates.train_stack_a.explicit.allegro)
+        LAMMPS_COMMIT=$(yaml_path_value candidates.md_stack_a.lammps.commit)
+        PAIR_NEQUIP_ALLEGRO_COMMIT=$(yaml_path_value candidates.md_stack_a.pair_nequip_allegro.commit)
     else
         BASE_IMAGE=${PHAL_BASE_IMAGE:-$(yaml_path_value scaffold_defaults.base_image)}
         IMAGE_TAG=${PHAL_IMAGE_TAG:-$(yaml_path_value scaffold_defaults.image_tag)}
         NEQUIP_VERSION=""
         ALLEGRO_VERSION=""
         BASE_IMAGE_DIGEST=""
+        LAMMPS_COMMIT=""
+        PAIR_NEQUIP_ALLEGRO_COMMIT=""
     fi
 
     require_value PHAL_PLATFORM "${PLATFORM}"
@@ -103,6 +117,9 @@ version_context() {
     if [[ "${target}" == "train-probe" ]]; then
         require_value nequip "${NEQUIP_VERSION}"
         require_value allegro "${ALLEGRO_VERSION}"
+    elif [[ "${target}" == "md-probe" ]]; then
+        require_value lammps_commit "${LAMMPS_COMMIT}"
+        require_value pair_nequip_allegro_commit "${PAIR_NEQUIP_ALLEGRO_COMMIT}"
     fi
 }
 
@@ -141,6 +158,11 @@ print_plan() {
     if [[ "${target}" == "train-probe" ]]; then
         echo "nequip=${NEQUIP_VERSION}"
         echo "allegro=${ALLEGRO_VERSION}"
+    elif [[ "${target}" == "md-probe" ]]; then
+        echo "inherited_nequip=${NEQUIP_VERSION}"
+        echo "inherited_allegro=${ALLEGRO_VERSION}"
+        echo "lammps_commit=${LAMMPS_COMMIT}"
+        echo "pair_nequip_allegro_commit=${PAIR_NEQUIP_ALLEGRO_COMMIT}"
     fi
 }
 
@@ -153,6 +175,11 @@ build_args() {
         BUILD_ARGS+=(
             --build-arg "NEQUIP_VERSION=${NEQUIP_VERSION}"
             --build-arg "ALLEGRO_VERSION=${ALLEGRO_VERSION}"
+        )
+    elif [[ "${target}" == "md-probe" ]]; then
+        BUILD_ARGS+=(
+            --build-arg "LAMMPS_COMMIT=${LAMMPS_COMMIT}"
+            --build-arg "PAIR_NEQUIP_ALLEGRO_COMMIT=${PAIR_NEQUIP_ALLEGRO_COMMIT}"
         )
     fi
 }
