@@ -210,6 +210,22 @@ future_stacks:
     status: not_started
 
 validated:
+  release_baseline: milestone3-md-probe
+  git:
+    branch: refs/heads/main
+    commit: "8ea02ebdb460153a403e046aa4434ef2b8bb7dba"
+    tag: milestone3-md-probe
+  train_probe:
+    pinned_oci_image: "ghcr.io/kiana-0423/train-probe@sha256:513aeaf7e997caa3b743ecc4b7c4d0defdfabd01a13de3f83841f2dc21810e86"
+    sif_sha256: "fd0e73861d22fce07b7d920ea406c3185db916bed93aa3fba5ca14d9f022bc47"
+    pbs_job_id: "2360507.opbs"
+    status: passed
+  md_probe:
+    pinned_oci_image: "ghcr.io/kiana-0423/md-probe@sha256:d684ffa628091e6277c3f4b98c4de6cd5ef53aa59b210387f253ac0b5e957885"
+    sif_sha256: "0b6307d80fff7a94aa69b807194854dc05d30fba6fe463f41d8906aace923627"
+    model_sha256: "0c800c6d94f697f461033c8ec19c0b52cc587bac873d07dd7435955a06aa2f54"
+    pbs_job_id: "2362776.opbs"
+    status: passed
   selected_train_stack: null
   selected_md_stack: null
   selected_cp2k_stack: null

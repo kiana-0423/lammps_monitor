@@ -1,5 +1,30 @@
 # PHAL — Physics-aware Hotspot Active Learning Platform
 
+## Validated Runtime Matrix
+
+The frozen Milestone 3 baseline is tagged `milestone3-md-probe` at commit
+`8ea02ebdb460153a403e046aa4434ef2b8bb7dba`.
+
+| Component | Validated baseline |
+| --- | --- |
+| Docker/OCI platform | Linux ARM64 |
+| Apptainer | 1.3.5 |
+| GPU | NVIDIA GH200 120GB, capability 9.0 |
+| CUDA runtime | 13.0 |
+| Torch | 2.9.0a0+50eac811a6.nv25.09 |
+| NequIP | 0.18.0 |
+| Allegro | 0.8.3 |
+| LAMMPS | 10 Sep 2025 |
+| pair backend | official pair_nequip_allegro v0.7.0, allegro/kk |
+| Train OCI | sha256:513aeaf7e997caa3b743ecc4b7c4d0defdfabd01a13de3f83841f2dc21810e86 |
+| Train SIF | fd0e73861d22fce07b7d920ea406c3185db916bed93aa3fba5ca14d9f022bc47 |
+| MD OCI | sha256:d684ffa628091e6277c3f4b98c4de6cd5ef53aa59b210387f253ac0b5e957885 |
+| MD SIF | 0b6307d80fff7a94aa69b807194854dc05d30fba6fe463f41d8906aace923627 |
+| Probe model | 0c800c6d94f697f461033c8ec19c0b52cc587bac873d07dd7435955a06aa2f54 |
+
+See [`docs/releases/milestone3-baseline.md`](docs/releases/milestone3-baseline.md)
+for scope, limitations, and evidence references.
+
 `hotspot_al` 是面向大规模反应型 MLIP-MD 的局域热点主动学习平台。PHAL 在逐原子
 尺度检测异常事件，只截取需要高精度标注的局域区域，并生成带区域掩码的数据，避免
 将整帧大体系送入 DFT。
