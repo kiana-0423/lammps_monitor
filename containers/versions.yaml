@@ -26,6 +26,8 @@ candidates:
     oci_digest: "sha256:513aeaf7e997caa3b743ecc4b7c4d0defdfabd01a13de3f83841f2dc21810e86"
     arm64_manifest_digest: "sha256:16ec38e19ce41db3533fc5f709c3521f2f794402ae8de190b267334bd4959f3c"
     pinned_oci_image: "ghcr.io/kiana-0423/train-probe@sha256:513aeaf7e997caa3b743ecc4b7c4d0defdfabd01a13de3f83841f2dc21810e86"
+    sif_path: build/containers/phal-train-probe-m2-train-probe-a-arm64.sif
+    sif_sha256: "fd0e73861d22fce07b7d920ea406c3185db916bed93aa3fba5ca14d9f022bc47"
     inherited:
       os: "ubuntu:24.04"
       python: "3.12"
@@ -53,11 +55,23 @@ candidates:
       remote_platform_log: build/evidence/train-probe-remote-platform-cpu.log
       remote_train_stack_log: build/evidence/train-probe-remote-train-stack-cpu.log
       oci_summary: build/evidence/train-probe-oci-summary.json
-      sif_inspect: null
-      sif_sha256: null
-      pbs_job_id: null
-      platform_log: null
-      train_stack_log: null
+      sif_inspect: build/evidence/train-probe-sif-inspect.txt
+      sif_sha256: build/evidence/train-probe-sif.sha256
+      pbs_job_id: build/evidence/train-probe-gh200-job-id.txt
+      pbs_output: build/evidence/train-probe-gh200-pbs-output.log
+      pbs_history: build/evidence/train-probe-gh200-history.log
+      environment_log: runtime/logs/validation/environment-2360507.opbs.log
+      gpu_smoke_log: runtime/logs/validation/gpu-smoke-2360507.opbs.json.log
+      platform_log: runtime/logs/validation/platform-2360507.opbs.json.log
+      train_stack_log: runtime/logs/validation/train-stack-2360507.opbs.json.log
+      gh200_summary: build/evidence/train-probe-gh200-summary.json
+    miyabi_gpu_details:
+      pbs_job_id: 2360507.opbs
+      compute_hostname: mg0006
+      gpu_name: "NVIDIA GH200 120GB"
+      gpu_capability: [9, 0]
+      torch_cuda: "13.0"
+      cuda_tensor_test: true
     validation:
       arm64_manifest: true
       image_build: true
@@ -69,11 +83,13 @@ candidates:
       oci_manifest_verified: true
       remote_oci_pull: true
       remote_cpu_validated: true
-      sif_conversion: false
-      miyabi_gpu: false
-      torch_cuda: false
+      sif_conversion: true
+      login_node_import: true
+      login_node_cpu_validation: true
+      miyabi_gpu: true
+      torch_cuda: true
       allegro_cpu_inference: true
-      allegro_gpu_inference: false
+      allegro_gpu_inference: true
 
 # Reserved locations only. Milestone 2 does not implement these stacks.
 future_stacks:

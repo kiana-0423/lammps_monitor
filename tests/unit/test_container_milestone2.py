@@ -118,12 +118,17 @@ def test_pbs_script_has_miyabi_gpu_contract() -> None:
     assert 'cd "$PBS_O_WORKDIR"' in text
     assert "module purge" in text
     assert "module load apptainer/1.3.5" in text
-    assert "apptainer exec --cleanenv --nv" in text
+    assert text.count("apptainer exec") == 3
+    assert text.count("--cleanenv") == 3
+    assert text.count("--nv") == 3
     assert '--bind "$PBS_O_WORKDIR/runtime:/runtime"' in text
     assert "APPTAINER_TMPDIR" in text
     assert "/logs/validation" in text
-    assert "<MIYABI_G_QUEUE>" in text
-    assert "<MIYABI_PROJECT_GROUP>" in text
+    assert "#PBS -q debug-g" in text
+    assert "#PBS -W group_list=gw34" in text
+    assert "gpu-smoke-${PBS_JOBID}.json.log" in text
+    assert "APPTAINERENV_PHAL_REQUIRE_CUDA=1" in text
+    assert "<MIYABI_" not in text
 
 
 def test_validators_record_real_gpu_and_inference_evidence() -> None:

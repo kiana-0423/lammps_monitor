@@ -1,55 +1,114 @@
 #!/bin/bash
-#PBS -q <MIYABI_G_QUEUE>
-#PBS -W group_list=<MIYABI_PROJECT_GROUP>
+#PBS -q debug-g
+#PBS -W group_list=gw34
 #PBS -l select=1
 #PBS -l walltime=00:15:00
+#PBS -N phal-train-probe
 #PBS -j oe
 
 set -euo pipefail
 
 cd "$PBS_O_WORKDIR"
+
 module purge
 module load apptainer/1.3.5
 
-IMAGE=${PHAL_TRAIN_PROBE_IMAGE:-}
-if [[ -z "${IMAGE}" ]]; then
-    echo "PHAL_TRAIN_PROBE_IMAGE must point to the train-probe SIF" >&2
-    exit 2
-fi
-if [[ ! -f "${IMAGE}" ]]; then
-    echo "train-probe SIF not found: ${IMAGE}" >&2
+: "${PHAL_TRAIN_PROBE_IMAGE:?PHAL_TRAIN_PROBE_IMAGE is not set}"
+
+if [[ ! -f "$PHAL_TRAIN_PROBE_IMAGE" ]]; then
+    echo "ERROR: SIF image not found: $PHAL_TRAIN_PROBE_IMAGE" >&2
     exit 2
 fi
 
 RUNTIME_DIR="$PBS_O_WORKDIR/runtime"
-LOG_DIR="${RUNTIME_DIR}/logs/validation"
-export APPTAINER_TMPDIR="/tmp/${USER}/phal-apptainer-${PBS_JOBID}"
+LOG_DIR="$RUNTIME_DIR/logs/validation"
+mkdir -p "$RUNTIME_DIR" "$LOG_DIR"
+
+JOB_TMP_ROOT="${TMPDIR:-/tmp/${USER}/${PBS_JOBID}}"
+export APPTAINER_TMPDIR="${JOB_TMP_ROOT}/phal-apptainer"
 export APPTAINERENV_PHAL_REQUIRE_CUDA=1
-mkdir -p "${APPTAINER_TMPDIR}" "${LOG_DIR}"
+mkdir -p "$APPTAINER_TMPDIR"
 
-platform_log="${LOG_DIR}/platform-${PBS_JOBID}.json.log"
-train_log="${LOG_DIR}/train-stack-${PBS_JOBID}.json.log"
-platform_rc=0
-train_rc=0
+PLATFORM_LOG="${LOG_DIR}/platform-${PBS_JOBID}.json.log"
+TRAIN_LOG="${LOG_DIR}/train-stack-${PBS_JOBID}.json.log"
+GPU_LOG="${LOG_DIR}/gpu-smoke-${PBS_JOBID}.json.log"
+ENV_LOG="${LOG_DIR}/environment-${PBS_JOBID}.log"
 
-apptainer exec --cleanenv --nv \
-  --bind "$PBS_O_WORKDIR/runtime:/runtime" \
-  "$IMAGE" \
-  python /opt/phal/containers/scripts/validate_platform.py \
-  >"${platform_log}" 2>&1 || platform_rc=$?
+cleanup() {
+    rm -rf "$APPTAINER_TMPDIR"
+}
+trap cleanup EXIT
 
-apptainer exec --cleanenv --nv \
-  --bind "$PBS_O_WORKDIR/runtime:/runtime" \
-  "$IMAGE" \
-  python /opt/phal/containers/scripts/validate_train_stack.py \
-  >"${train_log}" 2>&1 || train_rc=$?
+{
+    echo "job_id=$PBS_JOBID"
+    echo "hostname=$(hostname)"
+    echo "workdir=$PBS_O_WORKDIR"
+    echo "image=$PHAL_TRAIN_PROBE_IMAGE"
+    echo "apptainer=$(apptainer version)"
+    echo "tmpdir=$APPTAINER_TMPDIR"
+    echo "start_time=$(date --iso-8601=seconds)"
+} | tee "$ENV_LOG"
 
-cat "${platform_log}"
-cat "${train_log}"
+echo "=== GPU smoke test ==="
+apptainer exec \
+    --cleanenv \
+    --nv \
+    --bind "$PBS_O_WORKDIR/runtime:/runtime" \
+    "$PHAL_TRAIN_PROBE_IMAGE" \
+    python -c '
+import json
+import platform
+import torch
 
-if (( platform_rc != 0 || train_rc != 0 )); then
-    echo "train-probe validation failed: platform_rc=${platform_rc}, train_rc=${train_rc}" >&2
-    exit 1
-fi
+result = {
+    "machine": platform.machine(),
+    "torch": torch.__version__,
+    "torch_cuda": torch.version.cuda,
+    "cuda_available": torch.cuda.is_available(),
+    "cuda_device_count": torch.cuda.device_count(),
+    "gpu_name": None,
+    "cuda_device_capability": None,
+    "cuda_tensor_test": False,
+}
 
-echo "train-probe validation passed; logs: ${LOG_DIR}"
+if not torch.cuda.is_available():
+    print(json.dumps(result, sort_keys=True))
+    raise SystemExit("CUDA is not available inside the Apptainer container")
+
+device = torch.device("cuda:0")
+result["gpu_name"] = torch.cuda.get_device_name(0)
+result["cuda_device_capability"] = list(torch.cuda.get_device_capability(0))
+a = torch.randn((256, 256), device=device)
+b = torch.randn((256, 256), device=device)
+c = a @ b
+result["cuda_tensor_test"] = bool(torch.isfinite(c).all().item())
+print(json.dumps(result, sort_keys=True))
+
+if not result["cuda_tensor_test"]:
+    raise SystemExit("CUDA tensor matrix multiplication failed")
+' 2>&1 | tee "$GPU_LOG"
+
+echo "=== Platform validation ==="
+apptainer exec \
+    --cleanenv \
+    --nv \
+    --bind "$PBS_O_WORKDIR/runtime:/runtime" \
+    "$PHAL_TRAIN_PROBE_IMAGE" \
+    python /opt/phal/containers/scripts/validate_platform.py \
+    2>&1 | tee "$PLATFORM_LOG"
+
+echo "=== Allegro CPU/GPU inference validation ==="
+apptainer exec \
+    --cleanenv \
+    --nv \
+    --bind "$PBS_O_WORKDIR/runtime:/runtime" \
+    "$PHAL_TRAIN_PROBE_IMAGE" \
+    python /opt/phal/containers/scripts/validate_train_stack.py \
+    2>&1 | tee "$TRAIN_LOG"
+
+{
+    echo "end_time=$(date --iso-8601=seconds)"
+    echo "status=passed"
+} | tee -a "$ENV_LOG"
+
+echo "PHAL train-probe GH200 validation completed successfully."

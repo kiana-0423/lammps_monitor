@@ -1,0 +1,25 @@
+/home/w34000/.bashrc: line 29: /home/w34000/software/conda/etc/profile.d/conda.sh: No such file or directory
+Loading apptainer/1.3.5
+  Loading requirement: squashfuse/0.5.2 gocryptfs/2.4.0
+job_id=2360507.opbs
+hostname=mg0006
+workdir=/work/gw34/w34000/project/lammps_monitor
+image=/work/gw34/w34000/project/lammps_monitor/build/containers/phal-train-probe-m2-train-probe-a-arm64.sif
+apptainer=1.3.5
+tmpdir=/tmp/2360507.9044/phal-apptainer
+start_time=2026-07-11T15:03:32+09:00
+=== GPU smoke test ===
+/usr/local/lib/python3.12/dist-packages/torch/cuda/__init__.py:63: FutureWarning: The pynvml package is deprecated. Please install nvidia-ml-py instead. If you did not install pynvml directly, please report this to the maintainers of the package that installed pynvml for you.
+  import pynvml  # type: ignore[import]
+{"cuda_available": true, "cuda_device_capability": [9, 0], "cuda_device_count": 1, "cuda_tensor_test": true, "gpu_name": "NVIDIA GH200 120GB", "machine": "aarch64", "torch": "2.9.0a0+50eac811a6.nv25.09", "torch_cuda": "13.0"}
+=== Platform validation ===
+/usr/local/lib/python3.12/dist-packages/torch/cuda/__init__.py:63: FutureWarning: The pynvml package is deprecated. Please install nvidia-ml-py instead. If you did not install pynvml directly, please report this to the maintainers of the package that installed pynvml for you.
+  import pynvml  # type: ignore[import]
+{"allegro": "0.8.3", "cuda_available": true, "cuda_device_capability": [9, 0], "cuda_device_count": 1, "cuda_tensor_test": true, "errors": [], "failures": [], "gpu_name": "NVIDIA GH200 120GB", "machine": "aarch64", "nequip": "0.18.0", "package_versions": {"allegro": "0.8.3", "hotspot_al": "0.1.0", "nequip": "0.18.0", "torch": "2.9.0a0+50eac811a6.nv25.09"}, "phal_import": true, "platform": "Linux-5.14.0-427.13.1.el9_4.aarch64+64k-aarch64-with-glibc2.39", "python": "3.12.3", "require_cuda": true, "status": "passed", "torch": "2.9.0a0+50eac811a6.nv25.09", "torch_cuda": "13.0"}
+=== Allegro CPU/GPU inference validation ===
+/usr/local/lib/python3.12/dist-packages/torch/cuda/__init__.py:63: FutureWarning: The pynvml package is deprecated. Please install nvidia-ml-py instead. If you did not install pynvml directly, please report this to the maintainers of the package that installed pynvml for you.
+  import pynvml  # type: ignore[import]
+{"api": {"detail": "AllegroModel builder is available; a tiny eager model will be constructed", "status": "passed"}, "errors": [], "failures": [], "imports": {"allegro": {"status": "passed", "version": "0.8.3"}, "hotspot_al": {"status": "passed", "version": "0.1.0"}, "nequip": {"status": "passed", "version": "0.18.0"}, "torch": {"status": "passed", "version": "2.9.0a0+50eac811a6.nv25.09"}}, "inference": {"cpu": {"device": "cpu", "energy_finite": true, "energy_shape": [1, 1], "finite_energy_and_forces": true, "force_gradient_computed": true, "force_shape": [2, 3], "forces_finite": true, "randomly_initialized_model": true, "status": "passed"}, "cuda": {"device": "cuda", "energy_finite": true, "energy_shape": [1, 1], "finite_energy_and_forces": true, "force_gradient_computed": true, "force_shape": [2, 3], "forces_finite": true, "randomly_initialized_model": true, "status": "passed"}}, "status": "passed"}
+end_time=2026-07-11T15:03:49+09:00
+status=passed
+PHAL train-probe GH200 validation completed successfully.
