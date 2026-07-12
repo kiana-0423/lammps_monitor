@@ -28,7 +28,15 @@ def write_allegro_dataset(
     target.mkdir(parents=True, exist_ok=True)
     atoms = region.atoms.copy()
     mask = generate_atom_mask(region, config)
-    atoms.arrays["forces"] = np.asarray(forces, dtype=float)
+    force_array = np.asarray(forces, dtype=float)
+    expected_shape = (len(atoms), 3)
+    if force_array.shape != expected_shape:
+        msg = f"Expected forces with shape {expected_shape}, got {force_array.shape}."
+        raise ValueError(msg)
+    if mask.shape != (len(atoms),):
+        msg = f"Expected generated mask with shape {(len(atoms),)}, got {mask.shape}."
+        raise ValueError(msg)
+    atoms.arrays["forces"] = force_array
     atoms.arrays["mask_weights"] = mask
     atoms.arrays["region_code"] = region_codes_for_labels(generate_region_labels(region))
     atoms.info["mask_weight_key"] = "mask_weights"

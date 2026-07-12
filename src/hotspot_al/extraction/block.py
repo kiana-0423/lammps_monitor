@@ -158,7 +158,14 @@ def merge_adjacent_blocks(
                 queue.append(other)
         group = sorted(group)
         if max_merged_blocks is not None and max_merged_blocks > 0 and len(group) > max_merged_blocks:
-            groups.extend([group[index : index + max_merged_blocks] for index in range(0, len(group), max_merged_blocks)])
+            groups.extend(
+                _split_connected_block_group(
+                    group,
+                    max_blocks=max_merged_blocks,
+                    grid_shape=grid_shape,
+                    pbc=pbc,
+                )
+            )
         else:
             groups.append(group)
     return groups
@@ -409,6 +416,39 @@ def _blocks_are_adjacent(
         if diff > 1:
             return False
     return True
+
+
+def _split_connected_block_group(
+    group: list[BlockId],
+    *,
+    max_blocks: int,
+    grid_shape: tuple[int, int, int] | None,
+    pbc: tuple[bool, bool, bool],
+) -> list[list[BlockId]]:
+    """Split an oversized connected group into bounded connected subgroups."""
+
+    remaining = set(group)
+    chunks: list[list[BlockId]] = []
+    while remaining:
+        start = min(remaining)
+        remaining.remove(start)
+        chunk = [start]
+        queue: deque[BlockId] = deque([start])
+        while queue and len(chunk) < max_blocks:
+            current = queue.popleft()
+            neighbors = sorted(
+                other
+                for other in remaining
+                if _blocks_are_adjacent(current, other, grid_shape=grid_shape, pbc=pbc)
+            )
+            for other in neighbors:
+                if len(chunk) >= max_blocks:
+                    break
+                remaining.remove(other)
+                chunk.append(other)
+                queue.append(other)
+        chunks.append(sorted(chunk))
+    return chunks
 
 
 def _enforce_max_atoms(

@@ -82,6 +82,7 @@ class OnlineMonitor:
             "triggered_frames": 0,
             "events": 0,
             "full_frames": 0,
+            "physics_frames": 0,
             "light_frames": 0,
             "errors": 0,
         }
@@ -192,20 +193,57 @@ class OnlineMonitor:
             "delta_q": coordination_deltas(q_values, self._previous_q),
         }
 
-        full_frame = frame_index % self.monitor_freq == 0
-        if full_frame:
-            self.logger.debug("processing full frame step=%s index=%d", frame.step, frame_index)
-            mlip_forces = self.mlip_backend.evaluate_forces(atoms, model=self._primary_model_path())
-            metrics["mlip_force"] = force_norms(mlip_forces)
-            metrics["mlip_force_deviation"] = row_norms(np.asarray(frame.forces, dtype=float) - mlip_forces)
-            committee_paths = self._committee_model_paths()
-            if committee_paths:
-                committee_forces = self.mlip_backend.evaluate_committee(atoms, models=committee_paths)
-                metrics["committee"] = committee_force_deviation(committee_forces)
+        if not self._should_run_light(frame_index):
+            atom_scores = np.zeros(len(atoms), dtype=float)
+            result = OODFrameResult(
+                atom_scores=atom_scores,
+                metric_scores={},
+                max_score=0.0,
+                hotspot_indices=[],
+                trigger_reason=[],
+                triggered=False,
+                stage="light",
+                metadata={"skipped_by_light_interval": True},
+            )
+        elif self._should_run_full_sample(frame_index):
+            self.logger.debug("processing scheduled full frame step=%s index=%d", frame.step, frame_index)
+            self._add_mlip_metrics(metrics, atoms, frame.forces)
+            self._add_committee_metrics(metrics, atoms)
             result = self.scorer.score_full(metrics, atoms=atoms, forces=frame.forces)
         else:
             self.logger.debug("processing light frame step=%s index=%d", frame.step, frame_index)
-            result = self.scorer.score_light(metrics)
+            light_result = self.scorer.score_light(metrics, update_stats=False)
+            if self._should_run_physics(frame_index, triggered=light_result.triggered):
+                self.logger.debug("processing physics frame step=%s index=%d", frame.step, frame_index)
+                self._add_mlip_metrics(metrics, atoms, frame.forces)
+                physics_result = self.scorer.score_physics(
+                    metrics,
+                    update_stats=False,
+                    metadata={"screen_max_score": light_result.max_score},
+                    atoms=atoms,
+                    forces=frame.forces,
+                )
+                if self._should_run_committee(frame_index, triggered=physics_result.triggered):
+                    self.logger.debug("processing committee frame step=%s index=%d", frame.step, frame_index)
+                    self._add_committee_metrics(metrics, atoms)
+                    result = self.scorer.score_full(
+                        metrics,
+                        metadata={
+                            "screen_max_score": light_result.max_score,
+                            "physics_max_score": physics_result.max_score,
+                        },
+                        atoms=atoms,
+                        forces=frame.forces,
+                    )
+                else:
+                    result = self.scorer.score_physics(
+                        metrics,
+                        metadata={"screen_max_score": light_result.max_score},
+                        atoms=atoms,
+                        forces=frame.forces,
+                    )
+            else:
+                result = self.scorer.score_light(metrics)
 
         self._previous_positions = atoms.get_positions().copy()
         self._previous_forces = np.asarray(frame.forces, dtype=float).copy()
@@ -256,17 +294,20 @@ class OnlineMonitor:
             )
         if result.stage == "full":
             self._stats["full_frames"] += 1
+        elif result.stage == "physics":
+            self._stats["physics_frames"] += 1
         else:
             self._stats["light_frames"] += 1
         payload = {**self._stats, "last_stage": result.stage, "last_max_score": result.max_score}
         self._emit_progress(payload)
         if self.summary_interval and self._stats["processed_frames"] % self.summary_interval == 0:
             self.logger.info(
-                "monitor progress frames=%d triggers=%d events=%d full=%d light=%d",
+                "monitor progress frames=%d triggers=%d events=%d full=%d physics=%d light=%d",
                 self._stats["processed_frames"],
                 self._stats["triggered_frames"],
                 self._stats["events"],
                 self._stats["full_frames"],
+                self._stats["physics_frames"],
                 self._stats["light_frames"],
             )
 
@@ -310,6 +351,52 @@ class OnlineMonitor:
             self._neighbors = MonitorNeighbors(atoms, lj_cutoff=lj_cutoff, coordination_cutoff=coordination_cutoff)
         else:
             self._neighbors.rebuild(atoms)
+
+    def _add_mlip_metrics(self, metrics: dict[str, np.ndarray], atoms: Any, forces: np.ndarray) -> None:
+        if "mlip_force_deviation" in metrics:
+            return
+        mlip_forces = self.mlip_backend.evaluate_forces(atoms, model=self._primary_model_path())
+        metrics["mlip_force"] = force_norms(mlip_forces)
+        metrics["mlip_force_deviation"] = row_norms(np.asarray(forces, dtype=float) - mlip_forces)
+
+    def _add_committee_metrics(self, metrics: dict[str, np.ndarray], atoms: Any) -> None:
+        if "committee" in metrics:
+            return
+        committee_paths = self._committee_model_paths()
+        if committee_paths:
+            committee_forces = self.mlip_backend.evaluate_committee(atoms, models=committee_paths)
+            metrics["committee"] = committee_force_deviation(committee_forces)
+
+    def _should_run_full_sample(self, frame_index: int) -> bool:
+        return self.monitor_freq > 1 and frame_index % self.monitor_freq == 0
+
+    def _should_run_light(self, frame_index: int) -> bool:
+        return self._interval_due(self.config.get("monitor", {}).get("light_interval", 1), frame_index, triggered=True)
+
+    def _should_run_physics(self, frame_index: int, *, triggered: bool) -> bool:
+        return self._interval_due(self.config.get("monitor", {}).get("physics_interval", "triggered"), frame_index, triggered=triggered)
+
+    def _should_run_committee(self, frame_index: int, *, triggered: bool) -> bool:
+        return self._interval_due(self.config.get("monitor", {}).get("committee_interval", "triggered"), frame_index, triggered=triggered)
+
+    def _interval_due(self, interval: Any, frame_index: int, *, triggered: bool) -> bool:
+        if isinstance(interval, str):
+            normalized = interval.lower()
+            if normalized == "triggered":
+                return triggered
+            if normalized in {"never", "disabled", "off"}:
+                return False
+            if normalized in {"always", "all"}:
+                return True
+            try:
+                interval = int(normalized)
+            except ValueError:
+                return triggered
+        try:
+            interval_int = int(interval)
+        except (TypeError, ValueError):
+            return triggered
+        return interval_int > 0 and frame_index % interval_int == 0
 
     def _primary_model_path(self) -> str | Path | None:
         model_paths = self.mlip_backend.model_paths()

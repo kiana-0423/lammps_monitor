@@ -130,6 +130,51 @@ def test_running_stats_warmup_uses_raw_scores() -> None:
     assert np.allclose(result.metric_scores["force"], np.array([2.5, 0.5]))
 
 
+def test_running_stats_warmup_counts_frames_not_atom_samples() -> None:
+    config = _score_config()
+    config["ood_score"]["running_stats"] = {"enabled": True, "warmup_frames": 2, "min_std": 1.0}
+    scorer = OODScorer(config)
+    first = _base_metrics(n_atoms=4)
+    first["force"] = np.array([1.0, 2.0, 3.0, 4.0])
+    second = _base_metrics(n_atoms=4)
+    second["force"] = np.array([10.0, 0.0, 0.0, 0.0])
+
+    scorer.score_light(first)
+    result = scorer.score_light(second, update_stats=False)
+
+    assert scorer.stats["force"].count == 4
+    assert scorer.stats["force"].frame_count == 1
+    assert np.allclose(result.metric_scores["force"], second["force"])
+
+
+def test_displacement_z_threshold_applies_to_z_score_not_raw_displacement() -> None:
+    config = _score_config()
+    config["monitor"]["displacement_z_threshold"] = 4.0
+    config["ood_score"]["weights"] = {key: 0.0 for key in config["ood_score"]["weights"]}
+    config["ood_score"]["weights"]["displacement"] = 1.0
+    config["ood_score"]["screen_threshold"] = 0.5
+    config["ood_score"]["running_stats"] = {"enabled": True, "warmup_frames": 0, "min_std": 10.0}
+    metrics = _base_metrics()
+    metrics["displacement"] = np.array([5.0, 0.0])
+
+    result = OODScorer(config).score_light(metrics, update_stats=False)
+
+    assert np.allclose(result.metric_scores["displacement"], np.array([0.0, 0.0]))
+    assert not result.triggered
+
+
+def test_force_z_threshold_gates_force_scores() -> None:
+    config = _score_config()
+    config["monitor"]["force_z_threshold"] = 4.0
+    config["ood_score"]["running_stats"] = {"enabled": True, "warmup_frames": 0, "min_std": 1.0}
+    metrics = _base_metrics()
+    metrics["force"] = np.array([3.9, 4.1])
+
+    result = OODScorer(config).score_light(metrics, update_stats=False)
+
+    assert np.allclose(result.metric_scores["force"], np.array([0.0, 4.1]))
+
+
 def test_min_trigger_atoms_enforced() -> None:
     config = _score_config(min_trigger_atoms=3)
     metrics = _base_metrics(n_atoms=3)

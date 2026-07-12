@@ -109,6 +109,17 @@ def test_merge_adjacent_blocks() -> None:
     assert groups == [[(0, 0, 0), (1, 0, 0)], [(3, 0, 0)]]
 
 
+def test_merge_adjacent_blocks_max_split_preserves_connectivity() -> None:
+    groups = merge_adjacent_blocks(
+        [(0, 0, 0), (0, 2, 0), (1, 1, 0)],
+        max_merged_blocks=2,
+        grid_shape=(3, 3, 1),
+        pbc=(False, False, False),
+    )
+
+    assert groups == [[(0, 0, 0), (1, 1, 0)], [(0, 2, 0)]]
+
+
 def test_merge_adjacent_blocks_wraps_across_pbc_boundary() -> None:
     groups = merge_adjacent_blocks(
         [(0, 0, 0), (3, 0, 0)],

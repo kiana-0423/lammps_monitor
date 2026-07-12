@@ -50,6 +50,48 @@ def _task() -> ScheduledTask:
     return ScheduledTask(task_id="evt-cp2k", event=event)
 
 
+def _multi_block_task() -> ScheduledTask:
+    atoms = Atoms(
+        "H2",
+        positions=[[1.0, 1.0, 1.0], [8.0, 8.0, 8.0]],
+        cell=np.diag([10.0, 10.0, 10.0]),
+        pbc=False,
+    )
+    frame = FrameData(atoms=atoms, step=24, forces=np.zeros((2, 3)))
+    event = EventRecord(
+        pre_frames=[],
+        trigger_frame=frame,
+        post_frames=[],
+        hotspot_atoms=[0, 1],
+        ood_scores=np.array([7.0, 7.0]),
+        trigger_reason=["label_threshold"],
+        step=24,
+        time=None,
+        event_id="evt-blocks",
+    )
+    return ScheduledTask(task_id="evt-blocks", event=event)
+
+
+def _block_submit_config() -> dict:
+    config = load_config()
+    config["extraction"] = {
+        **config["extraction"],
+        "mode": "block",
+        "block": {
+            **config["extraction"]["block"],
+            "size": [5.0, 5.0, 5.0],
+            "merge_adjacent": False,
+            "cooldown_steps": 0,
+            "min_atoms": 1,
+            "max_atoms": 10,
+            "buffer": {"inner": 0.1, "outer": 0.1},
+            "halo": 0.1,
+            "frozen": {"enabled": False, "thickness": 0.0},
+        },
+    }
+    return config
+
+
 def test_cp2k_task_submitter_dry_run_writes_inputs(tmp_path: Path) -> None:
     submitter = CP2KTaskSubmitter(config=load_config(), work_dir=tmp_path, mode="dry_run")
     task = _task()
@@ -61,6 +103,18 @@ def test_cp2k_task_submitter_dry_run_writes_inputs(tmp_path: Path) -> None:
     assert job.input_file.is_file()
     assert (tmp_path / "evt-cp2k" / "region.extxyz").is_file()
     assert task.metadata["cp2k_job"]["input_file"] == str(job.input_file)
+
+
+def test_cp2k_task_submitter_submits_all_block_regions(tmp_path: Path) -> None:
+    submitter = CP2KTaskSubmitter(config=_block_submit_config(), work_dir=tmp_path, mode="dry_run")
+    task = _multi_block_task()
+
+    submitter(task)
+
+    assert set(submitter.jobs) == {"evt-blocks", "evt-blocks__region-2"}
+    assert (tmp_path / "evt-blocks" / "region.extxyz").is_file()
+    assert (tmp_path / "evt-blocks__region-2" / "region.extxyz").is_file()
+    assert [job["task_id"] for job in task.metadata["cp2k_jobs"]] == ["evt-blocks", "evt-blocks__region-2"]
 
 
 def test_cp2k_task_submitter_poll_writes_dataset(tmp_path: Path) -> None:

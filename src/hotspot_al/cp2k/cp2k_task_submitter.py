@@ -92,20 +92,49 @@ class CP2KTaskSubmitter:
             task.metadata["cp2k_job"] = {"task_id": task.task_id, "status": "failed"}
             raise
         task.metadata["cp2k_job"] = self._job_payload(job)
+        if "additional_jobs" in job.metadata:
+            task.metadata["cp2k_jobs"] = [task.metadata["cp2k_job"], *job.metadata["additional_jobs"]]
 
     def submit(self, task: ScheduledTask) -> CP2KSubmittedJob:
         """Create CP2K inputs for ``task`` and submit according to mode."""
 
-        task_dir = self.work_dir / task.task_id
-        task_dir.mkdir(parents=True, exist_ok=True)
         self.logger.info("preparing CP2K task %s", task.task_id)
-        region = self._prepare_region(task)
+        regions = self._prepare_regions(task)
+        jobs = [
+            self._submit_region(
+                task,
+                region,
+                task_id=task.task_id if index == 0 else f"{task.task_id}__region-{index + 1}",
+                region_index=index,
+                region_count=len(regions),
+            )
+            for index, region in enumerate(regions)
+        ]
+        primary = jobs[0]
+        if len(jobs) > 1:
+            primary.metadata["additional_jobs"] = [self._job_payload(job) for job in jobs[1:]]
+        return primary
+
+    def _submit_region(
+        self,
+        task: ScheduledTask,
+        region: ExtractedRegion,
+        *,
+        task_id: str,
+        region_index: int,
+        region_count: int,
+    ) -> CP2KSubmittedJob:
+        task_dir = self.work_dir / task_id
+        task_dir.mkdir(parents=True, exist_ok=True)
         write(task_dir / "region.extxyz", region.atoms, format="extxyz")
-        written = self.dft_backend.prepare_inputs(region, task_dir, task_id=task.task_id)
+        written = self.dft_backend.prepare_inputs(region, task_dir, task_id=task_id)
         input_file = written.get("single_point_input") or next(iter(written.values()))
         output_file = task_dir / f"{Path(input_file).stem}.out"
         metadata = {
-            "task_id": task.task_id,
+            "task_id": task_id,
+            "source_task_id": task.task_id,
+            "region_index": region_index,
+            "region_count": region_count,
             "event_step": task.event.step,
             "hotspot_atoms": task.event.hotspot_atoms,
             "region_atoms": len(region.atoms),
@@ -114,7 +143,7 @@ class CP2KTaskSubmitter:
         (task_dir / "task.json").write_text(json.dumps(metadata, indent=2), encoding="utf-8")
 
         job = CP2KSubmittedJob(
-            task_id=task.task_id,
+            task_id=task_id,
             work_dir=task_dir,
             input_file=Path(input_file),
             output_file=output_file,
@@ -124,8 +153,8 @@ class CP2KTaskSubmitter:
         )
         if self.mode in {"local", "slurm", "pbs"}:
             self._submit_with_scheduler(job)
-        self.jobs[task.task_id] = job
-        self.logger.info("CP2K task %s status=%s mode=%s", task.task_id, job.status, job.mode)
+        self.jobs[task_id] = job
+        self.logger.info("CP2K task %s status=%s mode=%s", task_id, job.status, job.mode)
         return job
 
     def poll_job(self, task_id: str) -> CP2KSubmittedJob:
@@ -197,6 +226,9 @@ class CP2KTaskSubmitter:
         return job
 
     def _prepare_region(self, task: ScheduledTask) -> ExtractedRegion:
+        return self._prepare_regions(task)[0]
+
+    def _prepare_regions(self, task: ScheduledTask) -> list[ExtractedRegion]:
         frame = task.event.trigger_frame
         if str(self.config.get("extraction", {}).get("mode", "cluster")) == "block":
             regions = extract_block_regions(
@@ -209,19 +241,21 @@ class CP2KTaskSubmitter:
             if not regions:
                 msg = f"no block region selected for task {task.task_id}; all candidate blocks may be in cooldown."
                 raise ValueError(msg)
-            region = regions[0]
-            if len(regions) > 1:
-                region.metadata["additional_block_regions_skipped"] = len(regions) - 1
         else:
             region = extract_cluster_region(frame.atoms, task.event.hotspot_atoms, config=self.config)
             region = add_h_caps(frame.atoms, region, config=self.config)
-        region.metadata = {
-            **region.metadata,
-            "original_frame_id": frame.step,
-            "hotspot_id": task.task_id,
-            "event_id": task.event.event_id,
-        }
-        return region
+            regions = [region]
+        for index, region in enumerate(regions):
+            region.metadata = {
+                **region.metadata,
+                "original_frame_id": frame.step,
+                "hotspot_id": task.task_id if index == 0 else f"{task.task_id}__region-{index + 1}",
+                "event_id": task.event.event_id,
+                "source_hotspot_id": task.task_id,
+                "region_index": index,
+                "region_count": len(regions),
+            }
+        return regions
 
     def _submit_local(self, job: CP2KSubmittedJob) -> subprocess.Popen[str]:
         request = self.dft_backend.execution_request(job.input_file, output_file=job.output_file)

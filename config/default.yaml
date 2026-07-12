@@ -59,6 +59,8 @@ allegro:
 allegro_model_input: {}
 
 monitor:
+  # Intervals accept positive integers for periodic sampling; "triggered" means
+  # run the next stage only when the previous stage triggers.
   light_interval: 1
   physics_interval: triggered
   committee_interval: triggered

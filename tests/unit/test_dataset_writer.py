@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 
 import numpy as np
+import pytest
 from ase import Atoms
 from ase.io import read
 
@@ -60,3 +61,29 @@ def test_write_dataset_entry_writes_structure_labels_and_metadata(tmp_path: Path
     assert metadata["region_labels"] == ["core", "inner_buffer", "h_cap"]
     assert metadata["masked_atom_indices"] == [2]
     assert metadata["extra_metadata"]["cp2k_output"] == "cp2k.out"
+
+
+def test_write_dataset_entry_rejects_force_shape_mismatch(tmp_path: Path) -> None:
+    region = _region()
+
+    with pytest.raises(ValueError, match="Expected forces"):
+        write_dataset_entry(
+            region,
+            forces=np.zeros((2, 3)),
+            mask=np.ones(3),
+            output_dir=tmp_path,
+            prefix="bad_forces",
+        )
+
+
+def test_write_dataset_entry_rejects_mask_shape_mismatch(tmp_path: Path) -> None:
+    region = _region()
+
+    with pytest.raises(ValueError, match="Expected mask"):
+        write_dataset_entry(
+            region,
+            forces=np.zeros((3, 3)),
+            mask=np.ones((3, 1)),
+            output_dir=tmp_path,
+            prefix="bad_mask",
+        )

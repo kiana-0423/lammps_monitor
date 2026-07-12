@@ -61,7 +61,7 @@ def _config() -> dict[str, Any]:
             "displacement_z_threshold": 10.0,
         },
         "buffer": {"pre_trigger_frames": 1, "post_trigger_frames": 1, "maxlen": 4},
-        "online": {"monitor_freq": 1},
+        "online": {"monitor_freq": 2},
         "ood_score": {
             "weights": {
                 "force": 0.0,
@@ -99,9 +99,29 @@ def test_online_monitor_triggers_buffer_and_callback() -> None:
     assert len(events) == 1
     assert events[0].trigger_frame.step == 0
     assert [frame.step for frame in events[0].post_frames] == [1]
-    assert events[0].metadata["trigger_steps"] == [0, 1]
-    assert events[0].hotspot_atoms == [0, 1, 2, 3]
-    assert evaluator.calls == 6
+    assert events[0].metadata["trigger_steps"] == [0]
+    assert events[0].hotspot_atoms == [0]
+    assert evaluator.calls == 3
+
+
+def test_online_monitor_cascades_from_light_to_physics_and_committee() -> None:
+    config = _config()
+    config["online"]["monitor_freq"] = 1
+    config["ood_score"]["weights"]["force"] = 1.0
+    evaluator = CountingEvaluator()
+    monitor = OnlineMonitor(
+        config=config,
+        runner=AllegroRunner(force_evaluator=evaluator),
+        frame_source=[_frame(0, 2.0)],
+        on_event=lambda _event: None,
+    )
+
+    results = monitor.run()
+
+    assert [result.stage for result in results] == ["full"]
+    assert results[0].metadata["screen_max_score"] >= 1.0
+    assert results[0].metadata["physics_max_score"] >= 1.0
+    assert evaluator.calls == 3
 
 
 def test_online_monitor_respects_monitor_frequency() -> None:

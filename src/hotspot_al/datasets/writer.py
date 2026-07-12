@@ -28,8 +28,18 @@ def write_dataset_entry(
     target = Path(output_dir)
     target.mkdir(parents=True, exist_ok=True)
     atoms = region.atoms.copy()
-    atoms.arrays["forces"] = np.asarray(forces, dtype=float)
-    atoms.arrays["mask_weights"] = np.asarray(mask, dtype=float)
+    force_array = np.asarray(forces, dtype=float)
+    mask_array = np.asarray(mask, dtype=float)
+    expected_force_shape = (len(atoms), 3)
+    if force_array.shape != expected_force_shape:
+        msg = f"Expected forces with shape {expected_force_shape}, got {force_array.shape}."
+        raise ValueError(msg)
+    expected_mask_shape = (len(atoms),)
+    if mask_array.shape != expected_mask_shape:
+        msg = f"Expected mask with shape {expected_mask_shape}, got {mask_array.shape}."
+        raise ValueError(msg)
+    atoms.arrays["forces"] = force_array
+    atoms.arrays["mask_weights"] = mask_array
     region_labels = generate_region_labels(region)
     atoms.arrays["region_code"] = region_codes_for_labels(region_labels)
     atoms.info["region_label_map"] = region_label_map_json()
@@ -44,8 +54,8 @@ def write_dataset_entry(
     npz_path = target / f"{prefix}_labels.npz"
     np.savez(
         npz_path,
-        forces=np.asarray(forces, dtype=float),
-        mask=np.asarray(mask, dtype=float),
+        forces=force_array,
+        mask=mask_array,
         original_indices=np.asarray(region.original_indices, dtype=int),
         core_indices=np.asarray(region.core_indices, dtype=int),
         inner_buffer_indices=np.asarray(region.inner_buffer_indices, dtype=int),
@@ -58,10 +68,10 @@ def write_dataset_entry(
     metadata = {
         "region_labels": region_labels,
         "atom_role": region_labels,
-        "force_weight": np.asarray(mask, dtype=float).tolist(),
+        "force_weight": mask_array.tolist(),
         "energy_weight": float((extra_metadata or {}).get("energy_weight", 0.0)),
         "core_atom_indices": list(region.core_indices),
-        "masked_atom_indices": np.where(np.asarray(mask, dtype=float) <= 0.0)[0].astype(int).tolist(),
+        "masked_atom_indices": np.where(mask_array <= 0.0)[0].astype(int).tolist(),
         "metadata": region.metadata,
         "extra_metadata": extra_metadata or {},
     }

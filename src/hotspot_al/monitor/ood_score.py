@@ -28,6 +28,7 @@ class RunningMetricStats:
     """Scalar running statistics for one metric across many frames."""
 
     count: int = 0
+    frame_count: int = 0
     mean: float = 0.0
     m2: float = 0.0
 
@@ -38,6 +39,7 @@ class RunningMetricStats:
         n_new = len(batch)
         if n_new == 0:
             return
+        self.frame_count += 1
         batch_mean = float(batch.mean())
         batch_m2 = float(np.sum((batch - batch_mean) ** 2))
         if self.count == 0:
@@ -86,10 +88,16 @@ class OODScorer:
         warmup_frames = int(section.get("warmup_frames", 5))
         min_std = float(section.get("min_std", 1.0e-8))
         stats = self.stats[name]
-        if stats.count < warmup_frames:
+        if stats.frame_count < warmup_frames:
             return np.abs(np.asarray(values, dtype=float))
         std = max(stats.std, min_std)
         return np.abs((np.asarray(values, dtype=float) - stats.mean) / std)
+
+    def _z_metric_score(self, name: str, values: np.ndarray, z_threshold: float | None) -> np.ndarray:
+        z_scores = self._z_score(name, values)
+        if z_threshold is None:
+            return z_scores
+        return np.where(z_scores >= float(z_threshold), z_scores, 0.0)
 
     def _threshold_score(self, values: np.ndarray, threshold: float | None, *, lower_is_worse: bool = False) -> np.ndarray:
         if threshold is None:
@@ -121,8 +129,12 @@ class OODScorer:
         displacement_values = np.asarray(metrics.get("displacement", np.zeros_like(force_values)), dtype=float)
 
         return {
-            "force": self._z_score("force", force_values),
-            "delta_force": self._z_score("delta_force", delta_force_values),
+            "force": self._z_metric_score("force", force_values, monitor_cfg.get("force_z_threshold")),
+            "delta_force": self._z_metric_score(
+                "delta_force",
+                delta_force_values,
+                monitor_cfg.get("delta_force_z_threshold"),
+            ),
             "rmin": self._threshold_score(
                 rmin_values,
                 monitor_cfg.get("rmin_threshold"),
@@ -132,9 +144,10 @@ class OODScorer:
                 self._z_score("delta_q", delta_q_values),
                 self._threshold_score(delta_q_values, monitor_cfg.get("delta_q_threshold")),
             ),
-            "displacement": np.maximum(
-                self._z_score("displacement", displacement_values),
-                self._threshold_score(displacement_values, monitor_cfg.get("displacement_z_threshold")),
+            "displacement": self._z_metric_score(
+                "displacement",
+                displacement_values,
+                monitor_cfg.get("displacement_z_threshold"),
             ),
         }
 

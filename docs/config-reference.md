@@ -15,6 +15,12 @@ Important sections:
   `AllegroInference`.
 - `online`: work directory, dump file, dump frequency, monitor frequency,
   optional progress JSON file, and error-continuation controls.
+- `monitor`: online stage cadence and per-metric thresholds. `light_interval`,
+  `physics_interval`, and `committee_interval` accept positive integers for
+  periodic sampling. The string `triggered` means the stage runs only when the
+  previous stage triggers. `online.monitor_freq > 1` adds a periodic forced-full
+  sample on matching frame indices; the default `monitor_freq: 1` follows the
+  staged cascade instead of forcing every frame to full.
 - `logging`: text or JSON logs via `logging.format`, plus optional file output.
 - `ood_score`: metric weights, trigger thresholds, running-stat settings.
 - `buffer`: pre/post trigger frame counts.
